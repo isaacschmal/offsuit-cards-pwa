@@ -1,0 +1,18 @@
+{
+  "name": "Offsuit Cards",
+  "short_name": "Offsuit",
+  "description": "Minimalist multi-game card engine & Texas Hold'em PWA",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

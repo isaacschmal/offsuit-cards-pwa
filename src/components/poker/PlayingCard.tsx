@@ -1,0 +1,212 @@
+import React from 'react';
+import { formatRank, isRedSuit } from '../../engine/deck';
+import type { Card, Suit } from '../../engine/types';
+
+interface SuitGraphicProps {
+  suit: Suit;
+  size?: number;
+}
+
+export const SuitGraphic: React.FC<SuitGraphicProps> = ({ suit, size = 22 }) => {
+  const color = isRedSuit(suit) ? '#ef4444' : '#18181b';
+
+  if (suit === 'hearts') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+      </svg>
+    );
+  }
+
+  if (suit === 'diamonds') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+        <path d="M12 2L20.5 12L12 22L3.5 12L12 2Z" />
+      </svg>
+    );
+  }
+
+  if (suit === 'spades') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+        <path d="M12 2C7 8 3 11.5 3 15a5.5 5.5 0 0 0 7.5 5.1L9 22h6l-1.5-1.9A5.5 5.5 0 0 0 21 15c0-3.5-4-7-9-13z" />
+      </svg>
+    );
+  }
+
+  // clubs
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+      <path d="M12 3a4.5 4.5 0 0 0-4.05 6.45A4.5 4.5 0 1 0 9.5 18.2L8 21h8l-1.5-2.8a4.5 4.5 0 1 0 1.55-8.75A4.5 4.5 0 0 0 12 3z" />
+    </svg>
+  );
+};
+
+/**
+ * Exact Offsuit geometric slate-gray card back (#9aa3aa) with white outer border
+ * and 12-spoke central white spinner/rosette (IMG_8408, IMG_8413).
+ */
+export const OffsuitCardBack: React.FC<{ className?: string }> = ({ className = '' }) => {
+  const spokes = Array.from({ length: 12 }, (_, i) => i * 30);
+
+  return (
+    <div
+      className={`relative bg-white p-[3px] rounded-[18px] overflow-hidden select-none ${className}`}
+    >
+      <div className="w-full h-full rounded-[15px] bg-[#9aa3aa] relative overflow-hidden flex items-center justify-center">
+        <svg
+          viewBox="0 0 100 142"
+          className="absolute inset-0 w-full h-full"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          {/* Thin geometric line & circle background pattern */}
+          <g stroke="rgba(255,255,255,0.42)" strokeWidth="1">
+            <line x1="50" y1="0" x2="50" y2="142" />
+            <line x1="0" y1="71" x2="100" y2="71" />
+            <circle cx="50" cy="71" r="46" />
+            <circle cx="50" cy="71" r="29" />
+            <circle cx="50" cy="18" r="19" />
+            <circle cx="50" cy="18" r="7" />
+            <circle cx="50" cy="124" r="19" />
+            <circle cx="50" cy="124" r="7" />
+            <circle cx="3" cy="71" r="16" />
+            <circle cx="3" cy="71" r="6" />
+            <circle cx="97" cy="71" r="16" />
+            <circle cx="97" cy="71" r="6" />
+            <path d="M5 10 Q50 55 95 10" />
+            <path d="M5 132 Q50 87 95 132" />
+          </g>
+
+          {/* Central solid slate medallion with white border */}
+          <circle
+            cx="50"
+            cy="71"
+            r="25"
+            fill="#9aa3aa"
+            stroke="rgba(255,255,255,0.55)"
+            strokeWidth="1.2"
+          />
+
+          {/* 12-spoke white spinner/rosette */}
+          <g transform="translate(50, 71)">
+            {spokes.map((angle) => (
+              <rect
+                key={angle}
+                x="-1.6"
+                y="-15.5"
+                width="3.2"
+                height="7.5"
+                rx="1.6"
+                fill="#ffffff"
+                transform={`rotate(${angle})`}
+              />
+            ))}
+          </g>
+        </svg>
+      </div>
+    </div>
+  );
+};
+
+interface CommunityCardSlotProps {
+  card?: Card;
+  index: number;
+}
+
+export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({ card, index }) => {
+  const overlapClass = index > 0 ? '-ml-[3px]' : '';
+
+  if (!card) {
+    return (
+      <OffsuitCardBack
+        className={`w-full aspect-[0.71] ${overlapClass} shadow-[-4px_0_12px_rgba(0,0,0,0.22)]`}
+      />
+    );
+  }
+
+  const red = isRedSuit(card.suit);
+  const rankText = formatRank(card.rank);
+
+  return (
+    <div
+      className={`w-full aspect-[0.71] bg-white rounded-[18px] p-2.5 flex flex-col justify-between items-start select-none ${overlapClass} shadow-[-6px_0_16px_rgba(0,0,0,0.18)]`}
+    >
+      <span
+        className={`text-[26px] font-normal leading-none tracking-tight ${
+          red ? 'text-[#ef4444]' : 'text-[#18181b]'
+        }`}
+      >
+        {rankText}
+      </span>
+      <div className="pl-0.5 pb-0.5">
+        <SuitGraphic suit={card.suit} size={19} />
+      </div>
+    </div>
+  );
+};
+
+interface HoleCardsBlockProps {
+  cards: Card[];
+  folded?: boolean;
+  onFoldTrigger?: () => void;
+}
+
+/**
+ * Bottom-left 2 overlapping hole cards block matching IMG_8408 - IMG_8413.
+ */
+export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
+  cards,
+  folded = false,
+}) => {
+  const first = cards[0];
+  const second = cards[1];
+
+  if (!first || !second) {
+    return (
+      <div className="relative w-full h-[142px] flex items-center">
+        <OffsuitCardBack className="w-[58%] h-full rounded-[24px]" />
+        <OffsuitCardBack className="w-[58%] h-full rounded-[24px] -ml-[16%] shadow-[-10px_0_22px_rgba(0,0,0,0.28)]" />
+      </div>
+    );
+  }
+
+  const firstRed = isRedSuit(first.suit);
+  const secondRed = isRedSuit(second.suit);
+
+  return (
+    <div
+      className={`relative w-full h-[142px] flex items-stretch transition-opacity duration-200 ${
+        folded ? 'opacity-35' : 'opacity-100'
+      }`}
+    >
+      {/* Left Hole Card */}
+      <div className="w-[58%] h-full bg-white rounded-[24px] px-4 py-3.5 flex flex-col justify-between items-start">
+        <span
+          className={`text-[40px] font-normal leading-none tracking-tight ${
+            firstRed ? 'text-[#ef4444]' : 'text-[#18181b]'
+          }`}
+        >
+          {formatRank(first.rank)}
+        </span>
+        <div className="pl-0.5 pb-0.5">
+          <SuitGraphic suit={first.suit} size={26} />
+        </div>
+      </div>
+
+      {/* Right Hole Card overlapping left card with soft drop shadow */}
+      <div className="w-[58%] h-full bg-white rounded-[24px] px-4 py-3.5 flex flex-col justify-between items-start -ml-[16%] shadow-[-10px_0_24px_rgba(0,0,0,0.22)]">
+        <span
+          className={`text-[40px] font-normal leading-none tracking-tight ${
+            secondRed ? 'text-[#ef4444]' : 'text-[#18181b]'
+          }`}
+        >
+          {formatRank(second.rank)}
+        </span>
+        <div className="pl-0.5 pb-0.5">
+          <SuitGraphic suit={second.suit} size={26} />
+        </div>
+      </div>
+    </div>
+  );
+};
