@@ -6,18 +6,20 @@ interface TopOpponentsRowProps {
   opponents: Player[]; // seats 1..5: Emma, Leo, Akash, Tori, Evelyn
   dealerIndex: number;
   currentTurnIndex: number;
+  isShowdown?: boolean;
 }
 
 export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
   opponents,
   dealerIndex,
   currentTurnIndex,
+  isShowdown = false,
 }) => {
   return (
     <div className="grid grid-cols-5 gap-1 w-full pt-1">
       {opponents.map((opp) => {
         const isDealer = opp.seatIndex === dealerIndex;
-        const isTurn = opp.seatIndex === currentTurnIndex;
+        const isTurn = !isShowdown && opp.seatIndex === currentTurnIndex;
         const isFolded = opp.status === 'folded';
         const showOverlayText =
           opp.lastAction === 'Fold' || opp.lastAction === 'Raise'
@@ -26,15 +28,11 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
 
         return (
           <div key={opp.id} className="flex flex-col items-center">
-            {/* Subtle top turn indicator triangle like IMG_8411 */}
+            {/* Subtle top turn indicator triangle (▼) like IMG_8411 above Akash */}
             <div className="h-3 flex items-center justify-center mb-1">
-              {(isTurn || isDealer) && (
-                <span
-                  className={`text-[9px] leading-none transition-opacity ${
-                    isTurn ? 'text-white opacity-90' : 'text-[#7c7d85] opacity-0'
-                  }`}
-                >
-                  ▾
+              {isTurn && !isFolded && (
+                <span className="text-[8px] leading-none text-white opacity-90 transition-opacity duration-150">
+                  ▼
                 </span>
               )}
             </div>

@@ -1,4 +1,5 @@
-import React from 'react';
+import { motion, type PanInfo } from 'framer-motion';
+import React, { useEffect, useState } from 'react';
 import { formatRank, isRedSuit } from '../../engine/deck';
 import type { Card, Suit } from '../../engine/types';
 
@@ -44,7 +45,7 @@ export const SuitGraphic: React.FC<SuitGraphicProps> = ({ suit, size = 22 }) => 
 
 /**
  * Exact Offsuit geometric slate-gray card back (#9aa3aa) with white outer border
- * and 12-spoke central white spinner/rosette (IMG_8408, IMG_8413).
+ * and slowly spinning 12-spoke central white spinner/rosette (IMG_8408, IMG_8413).
  */
 export const OffsuitCardBack: React.FC<{ className?: string }> = ({ className = '' }) => {
   const spokes = Array.from({ length: 12 }, (_, i) => i * 30);
@@ -88,20 +89,22 @@ export const OffsuitCardBack: React.FC<{ className?: string }> = ({ className = 
             strokeWidth="1.2"
           />
 
-          {/* 12-spoke white spinner/rosette */}
+          {/* Slowly spinning 12-spoke white spinner/rosette */}
           <g transform="translate(50, 71)">
-            {spokes.map((angle) => (
-              <rect
-                key={angle}
-                x="-1.6"
-                y="-15.5"
-                width="3.2"
-                height="7.5"
-                rx="1.6"
-                fill="#ffffff"
-                transform={`rotate(${angle})`}
-              />
-            ))}
+            <g className="offsuit-rosette-spin">
+              {spokes.map((angle) => (
+                <rect
+                  key={angle}
+                  x="-1.6"
+                  y="-15.5"
+                  width="3.2"
+                  height="7.5"
+                  rx="1.6"
+                  fill="#ffffff"
+                  transform={`rotate(${angle})`}
+                />
+              ))}
+            </g>
           </g>
         </svg>
       </div>
@@ -114,34 +117,83 @@ interface CommunityCardSlotProps {
   index: number;
 }
 
+/**
+ * 3D Perspective Community Card Slot.
+ * Keeps both the Back Face (OffsuitCardBack) and Front Face (revealed rank & suit)
+ * mounted with `backfaceVisibility: 'hidden'` and animates `rotateY` from 0deg to 180deg
+ * with a staggered flop delay (`index * 0.14s`).
+ */
 export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({ card, index }) => {
   const overlapClass = index > 0 ? '-ml-[3px]' : '';
+  const [lastRevealedCard, setLastRevealedCard] = useState<Card | undefined>(card);
 
-  if (!card) {
-    return (
-      <OffsuitCardBack
-        className={`w-full aspect-[0.71] ${overlapClass} shadow-[-4px_0_12px_rgba(0,0,0,0.22)]`}
-      />
-    );
-  }
+  useEffect(() => {
+    if (card) {
+      setLastRevealedCard(card);
+    }
+  }, [card]);
 
-  const red = isRedSuit(card.suit);
-  const rankText = formatRank(card.rank);
+  const displayCard = card ?? lastRevealedCard;
+  const isRevealed = Boolean(card);
+  const red = displayCard ? isRedSuit(displayCard.suit) : false;
+  const rankText = displayCard ? formatRank(displayCard.rank) : '';
+
+  // Staggered delay on the flop (cards 0, 1, 2), immediate subtle flip on turn/river
+  const flipDelay = isRevealed ? (index < 3 ? index * 0.14 : 0.04) : 0;
 
   return (
     <div
-      className={`w-full aspect-[0.71] bg-white rounded-[18px] p-2.5 flex flex-col justify-between items-start select-none ${overlapClass} shadow-[-6px_0_16px_rgba(0,0,0,0.18)]`}
+      className={`w-full aspect-[0.71] relative select-none ${overlapClass}`}
+      style={{ perspective: '1000px' }}
     >
-      <span
-        className={`text-[26px] font-normal leading-none tracking-tight ${
-          red ? 'text-[#ef4444]' : 'text-[#18181b]'
-        }`}
+      <motion.div
+        className="w-full h-full relative"
+        style={{ transformStyle: 'preserve-3d' }}
+        initial={false}
+        animate={{ rotateY: isRevealed ? 180 : 0 }}
+        transition={{
+          duration: 0.48,
+          delay: flipDelay,
+          ease: [0.22, 1, 0.36, 1],
+        }}
       >
-        {rankText}
-      </span>
-      <div className="pl-0.5 pb-0.5">
-        <SuitGraphic suit={card.suit} size={19} />
-      </div>
+        {/* Back Face (0deg) */}
+        <div
+          className="absolute inset-0 w-full h-full"
+          style={{
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            transform: 'rotateY(0deg)',
+          }}
+        >
+          <OffsuitCardBack className="w-full h-full shadow-[-4px_0_12px_rgba(0,0,0,0.22)]" />
+        </div>
+
+        {/* Front Face (180deg) */}
+        <div
+          className="absolute inset-0 w-full h-full bg-white rounded-[18px] p-2.5 flex flex-col justify-between items-start shadow-[-6px_0_16px_rgba(0,0,0,0.18)]"
+          style={{
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            transform: 'rotateY(180deg)',
+          }}
+        >
+          {displayCard && (
+            <>
+              <span
+                className={`text-[26px] font-normal leading-none tracking-tight ${
+                  red ? 'text-[#ef4444]' : 'text-[#18181b]'
+                }`}
+              >
+                {rankText}
+              </span>
+              <div className="pl-0.5 pb-0.5">
+                <SuitGraphic suit={displayCard.suit} size={19} />
+              </div>
+            </>
+          )}
+        </div>
+      </motion.div>
     </div>
   );
 };
@@ -149,16 +201,32 @@ export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({ card, inde
 interface HoleCardsBlockProps {
   cards: Card[];
   folded?: boolean;
+  canDragToFold?: boolean;
   onFoldTrigger?: () => void;
 }
 
 /**
  * Bottom-left 2 overlapping hole cards block matching IMG_8408 - IMG_8413.
+ * Supports Offsuit's signature Throw-to-Fold upward flick/drag gesture:
+ * dragging/flicking past `offset.y < -65` or `velocity.y < -350` animates the cards
+ * flying into the center table (`opacity: 0, y: -220, scale: 0.45, rotate: -15`)
+ * and triggers the `fold` action.
  */
 export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
   cards,
   folded = false,
+  canDragToFold = false,
+  onFoldTrigger,
 }) => {
+  const [isThrown, setIsThrown] = useState(false);
+
+  // Reset thrown state when a new hand starts or player is no longer folded
+  useEffect(() => {
+    if (!folded) {
+      setIsThrown(false);
+    }
+  }, [folded, cards[0]?.id, cards[1]?.id]);
+
   const first = cards[0];
   const second = cards[1];
 
@@ -173,11 +241,46 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
 
   const firstRed = isRedSuit(first.suit);
   const secondRed = isRedSuit(second.suit);
+  const dragEnabled = canDragToFold && !folded && !isThrown;
+
+  const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (!dragEnabled) return;
+    if (info.offset.y < -65 || info.velocity.y < -350) {
+      setIsThrown(true);
+      window.setTimeout(() => {
+        onFoldTrigger?.();
+      }, 220);
+    }
+  };
 
   return (
-    <div
-      className={`relative w-full h-[142px] flex items-stretch transition-opacity duration-200 ${
-        folded ? 'opacity-35' : 'opacity-100'
+    <motion.div
+      drag={dragEnabled}
+      dragSnapToOrigin
+      dragElastic={0.85}
+      onDragEnd={handleDragEnd}
+      whileDrag={{
+        scale: 1.04,
+        rotate: -4,
+        zIndex: 30,
+      }}
+      animate={
+        isThrown
+          ? { opacity: 0, y: -220, scale: 0.45, rotate: -15 }
+          : {
+              opacity: folded ? 0.35 : 1,
+              y: 0,
+              scale: 1,
+              rotate: 0,
+            }
+      }
+      transition={
+        isThrown
+          ? { duration: 0.22, ease: 'easeOut' }
+          : { type: 'spring', stiffness: 380, damping: 28 }
+      }
+      className={`relative w-full h-[142px] flex items-stretch touch-none ${
+        dragEnabled ? 'cursor-grab active:cursor-grabbing' : ''
       }`}
     >
       {/* Left Hole Card */}
@@ -207,6 +310,6 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
           <SuitGraphic suit={second.suit} size={26} />
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };

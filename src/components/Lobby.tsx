@@ -1,15 +1,25 @@
-import { Copy, Play, Plus, Sparkles, Users } from 'lucide-react';
-import React, { useState } from 'react';
+import { Bell, Clock, Copy, Play, Plus, Sparkles, Users, Zap } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import type { GameMode } from '../engine/types';
+import {
+  createNewOpenRoom,
+  getNotificationPermission,
+  loadOpenRooms,
+  type OpenRoomInfo,
+  type RoomPacingMode,
+  requestTurnNotificationPermission,
+  subscribeToOpenRoomsDirectory,
+} from '../lib/multiplayer';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { Avatar3D } from './poker/Avatar3D';
 import { OffsuitCardBack } from './poker/PlayingCard';
 
 interface LobbyProps {
   activeRoomCode: string;
+  activePacingMode: RoomPacingMode;
   onlineCount: number;
   onStartInstantTable: () => void;
-  onJoinOrCreateRoom: (roomCode: string) => void;
+  onJoinOrCreateRoom: (roomCode: string, pacingMode?: RoomPacingMode, roomName?: string) => void;
 }
 
 interface GameModeOption {
@@ -48,20 +58,43 @@ const GAME_MODES: GameModeOption[] = [
 
 export const Lobby: React.FC<LobbyProps> = ({
   activeRoomCode,
+  activePacingMode,
   onlineCount,
   onStartInstantTable,
   onJoinOrCreateRoom,
 }) => {
+  const [openRooms, setOpenRooms] = useState<OpenRoomInfo[]>(() => loadOpenRooms());
+  const [selectedPacing, setSelectedPacing] = useState<RoomPacingMode>(activePacingMode);
+  const [newRoomName, setNewRoomName] = useState('');
   const [joinInput, setJoinInput] = useState('');
   const [copied, setCopied] = useState(false);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission | 'unsupported'>(() =>
+    getNotificationPermission()
+  );
 
-  const handleGenerateRoom = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i = 0; i < 5; i++) {
-      code += chars[Math.floor(Math.random() * chars.length)];
+  useEffect(() => {
+    setOpenRooms(loadOpenRooms());
+    return subscribeToOpenRoomsDirectory((updated) => {
+      setOpenRooms(updated);
+    });
+  }, []);
+
+  const handleCreateRoom = () => {
+    const label =
+      newRoomName.trim() ||
+      (selectedPacing === 'async' ? 'Mesa por Turnos' : 'Mesa En Vivo');
+    const created = createNewOpenRoom(label, selectedPacing);
+    setOpenRooms(loadOpenRooms());
+    setNewRoomName('');
+    if (selectedPacing === 'async' && notifPerm === 'default') {
+      void requestTurnNotificationPermission().then(setNotifPerm);
     }
-    onJoinOrCreateRoom(code);
+    onJoinOrCreateRoom(created.code, created.pacingMode, created.name);
+  };
+
+  const handleEnableNotifications = async () => {
+    const res = await requestTurnNotificationPermission();
+    setNotifPerm(res);
   };
 
   const handleCopyCode = () => {
@@ -72,7 +105,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   return (
     <div className="min-h-[100dvh] w-full bg-black text-white flex justify-center select-none">
-      <div className="w-full max-w-[420px] min-h-[100dvh] flex flex-col justify-between px-5 py-7">
+      <div className="w-full max-w-[420px] min-h-[100dvh] flex flex-col justify-between px-5 py-6">
         {/* Top Brand + Player Profile Pill */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -84,7 +117,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 Offsuit
               </h1>
               <p className="text-[12px] text-[#7c7d85] mt-1">
-                {isSupabaseConfigured ? 'Supabase Realtime Ready' : 'Local & Multi-Tab Sync'}
+                {isSupabaseConfigured ? 'Supabase Realtime Ready' : 'Salas En Vivo & Por Turnos'}
               </p>
             </div>
           </div>
@@ -95,15 +128,27 @@ export const Lobby: React.FC<LobbyProps> = ({
           </div>
         </div>
 
-        {/* Main Quick Play & Multiplayer Room Card */}
-        <div className="my-6 flex flex-col gap-4">
-          <div className="bg-[#16171a] border border-[#23252a] rounded-[24px] p-5 flex flex-col gap-4">
+        {/* Main Content Stack */}
+        <div className="my-5 flex flex-col gap-4">
+          {/* Active Table Resume Card */}
+          <div className="bg-[#16171a] border border-[#23252a] rounded-[24px] p-4.5 flex flex-col gap-3.5">
             <div className="flex items-center justify-between">
               <div>
-                <span className="text-[12px] text-[#7c7d85] font-medium uppercase tracking-wider">
-                  Mesa Activa
-                </span>
-                <h2 className="text-[20px] font-medium text-white mt-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-[#7c7d85] font-medium uppercase tracking-wider">
+                    Mesa Actual
+                  </span>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                      activePacingMode === 'async'
+                        ? 'bg-[#eab308]/15 text-[#eab308]'
+                        : 'bg-emerald-500/15 text-emerald-400'
+                    }`}
+                  >
+                    {activePacingMode === 'async' ? '⏳ Por Turnos' : '⚡ En Vivo'}
+                  </span>
+                </div>
+                <h2 className="text-[19px] font-medium text-white mt-0.5">
                   Texas Hold&apos;em
                 </h2>
               </div>
@@ -119,70 +164,194 @@ export const Lobby: React.FC<LobbyProps> = ({
             </div>
 
             {/* Avatars preview row */}
-            <div className="flex items-center justify-between bg-black/40 rounded-[18px] px-3.5 py-2.5">
+            <div className="flex items-center justify-between bg-black/40 rounded-[18px] px-3.5 py-2">
               <div className="flex -space-x-2">
                 {['hero', 'emma', 'leo', 'akash', 'tori', 'evelyn'].map((av) => (
                   <div
                     key={av}
-                    className="w-8 h-8 rounded-full bg-[#16171a] ring-2 ring-black flex items-center justify-center overflow-hidden"
+                    className="w-7 h-7 rounded-full bg-[#16171a] ring-2 ring-black flex items-center justify-center overflow-hidden"
                   >
-                    <Avatar3D avatarId={av} size={30} />
+                    <Avatar3D avatarId={av} size={26} />
                   </div>
                 ))}
               </div>
               <div className="flex items-center gap-1.5 text-[12px] text-[#7c7d85]">
                 <Users className="w-3.5 h-3.5" />
-                <span>{onlineCount} online · Bots fill seats</span>
+                <span>{onlineCount} online · 6-Max</span>
               </div>
             </div>
 
             <button
               type="button"
               onClick={onStartInstantTable}
-              className="w-full h-[52px] rounded-full bg-white text-black font-semibold text-[16px] flex items-center justify-center gap-2 active:scale-[0.99] transition-transform cursor-pointer"
+              className="w-full h-[48px] rounded-full bg-white text-black font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.99] transition-transform cursor-pointer"
             >
               <Play className="w-4 h-4 fill-black" />
               <span>Entrar a la Mesa</span>
             </button>
           </div>
 
-          {/* Create or Join Friends Room */}
+          {/* OPEN ROOMS DIRECTORY: 1-Tap Join without code/link */}
           <div className="bg-[#16171a] border border-[#23252a] rounded-[24px] p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <span className="text-[13px] text-[#7c7d85] font-medium">
-                Jugar con amigos (Código de Sala)
-              </span>
+              <div>
+                <span className="text-[13px] text-white font-medium">
+                  Salas Abiertas (1-Tap)
+                </span>
+                <p className="text-[11px] text-[#7c7d85]">
+                  Entra directo con tus primos o amigos sin escribir código
+                </p>
+              </div>
+              {notifPerm !== 'granted' && notifPerm !== 'unsupported' && (
+                <button
+                  type="button"
+                  onClick={handleEnableNotifications}
+                  className="flex items-center gap-1 bg-[#23252a] hover:bg-[#2c2e35] text-[#eab308] text-[11px] font-medium px-2.5 py-1.5 rounded-full cursor-pointer"
+                >
+                  <Bell className="w-3 h-3" />
+                  <span>Avisar turno</span>
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {openRooms.slice(0, 4).map((room) => {
+                const isCurrent = room.code === activeRoomCode;
+                return (
+                  <button
+                    key={room.code}
+                    type="button"
+                    onClick={() =>
+                      onJoinOrCreateRoom(room.code, room.pacingMode, room.name)
+                    }
+                    className={`w-full rounded-[16px] px-3.5 py-2.5 flex items-center justify-between border text-left transition-colors cursor-pointer ${
+                      isCurrent
+                        ? 'bg-black/80 border-white/30'
+                        : 'bg-black/40 border-[#23252a] hover:border-white/20'
+                    }`}
+                  >
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[14px] font-medium text-white">
+                          {room.name}
+                        </span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                            room.pacingMode === 'async'
+                              ? 'bg-[#eab308]/15 text-[#eab308]'
+                              : 'bg-emerald-500/15 text-emerald-400'
+                          }`}
+                        >
+                          {room.pacingMode === 'async' ? '⏳ Por Turnos' : '⚡ En Vivo'}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-[#7c7d85] mt-0.5">
+                        #{room.code} · Ciegas {room.blindsLabel} · Turno:{' '}
+                        <span className="text-white/80">{room.currentTurnPlayerName}</span>
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] text-[#7c7d85]">
+                        {room.playerCount}/{room.maxPlayers}
+                      </span>
+                      <span className="h-7 px-3 rounded-full bg-white text-black text-[12px] font-semibold flex items-center">
+                        Entrar
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* CREATE ROOM (WITH PACING MODE) OR JOIN BY CODE */}
+          <div className="bg-[#16171a] border border-[#23252a] rounded-[24px] p-4 flex flex-col gap-3">
+            <span className="text-[13px] text-white font-medium">
+              Crear Sala o Unirse con Código
+            </span>
+
+            {/* Pacing Mode Toggle: ⚡ En Vivo vs ⏳ Por Turnos */}
+            <div className="grid grid-cols-2 gap-2 bg-black p-1 rounded-full border border-[#23252a]">
               <button
                 type="button"
-                onClick={handleGenerateRoom}
-                className="flex items-center gap-1 text-[12px] text-white hover:opacity-80 cursor-pointer"
+                onClick={() => setSelectedPacing('live')}
+                className={`h-9 rounded-full text-[12px] font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                  selectedPacing === 'live'
+                    ? 'bg-white text-black'
+                    : 'text-[#7c7d85] hover:text-white'
+                }`}
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Crear Sala</span>
+                <Zap className="w-3.5 h-3.5" />
+                <span>⚡ En Vivo (15-20s)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedPacing('async')}
+                className={`h-9 rounded-full text-[12px] font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                  selectedPacing === 'async'
+                    ? 'bg-white text-black'
+                    : 'text-[#7c7d85] hover:text-white'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>⏳ Por Turnos</span>
               </button>
             </div>
 
+            <p className="text-[11px] text-[#7c7d85] px-1">
+              {selectedPacing === 'live'
+                ? '⚡ Ideal cuando están todos conectados al mismo tiempo.'
+                : '⏳ Estilo ajedrez: cada quien juega cuando puede y recibe notificación en su turno.'}
+            </p>
+
+            {/* Create named room row */}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={newRoomName}
+                onChange={(e) => setNewRoomName(e.target.value)}
+                placeholder="Nombre (ej. Mesa de los Primos)"
+                maxLength={28}
+                className="flex-1 h-[42px] rounded-full bg-black border border-[#23252a] px-4 text-[13px] text-white placeholder:text-[#7c7d85] focus:outline-none focus:border-white/40"
+              />
+              <button
+                type="button"
+                onClick={handleCreateRoom}
+                className="h-[42px] px-4 rounded-full bg-white text-black text-[13px] font-semibold flex items-center gap-1 shrink-0 active:scale-95 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Crear</span>
+              </button>
+            </div>
+
+            {/* Direct short code form */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 if (joinInput.trim()) {
-                  onJoinOrCreateRoom(joinInput.trim().toUpperCase());
+                  onJoinOrCreateRoom(
+                    joinInput.trim().toUpperCase(),
+                    selectedPacing,
+                    `Sala #${joinInput.trim().toUpperCase()}`
+                  );
                   setJoinInput('');
                 }
               }}
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 pt-1"
             >
               <input
                 type="text"
                 value={joinInput}
                 onChange={(e) => setJoinInput(e.target.value.toUpperCase())}
-                placeholder="Código (ej. POKER)"
+                placeholder="O ingresa código corto (ej. PRIMOS)"
                 maxLength={8}
-                className="flex-1 h-[44px] rounded-full bg-black border border-[#23252a] px-4 text-[14px] text-white placeholder:text-[#7c7d85] focus:outline-none focus:border-white/40"
+                className="flex-1 h-[40px] rounded-full bg-black border border-[#23252a] px-4 text-[13px] text-white placeholder:text-[#7c7d85] focus:outline-none focus:border-white/40"
               />
               <button
                 type="submit"
-                className="h-[44px] px-5 rounded-full bg-[#23252a] text-white text-[14px] font-medium active:scale-95 cursor-pointer"
+                className="h-[40px] px-4 rounded-full bg-[#23252a] text-white text-[13px] font-medium active:scale-95 cursor-pointer"
               >
                 Unirse
               </button>

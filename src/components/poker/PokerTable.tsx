@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowUp, X } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { calculateHoldemEquity } from '../../engine/poker/equity';
 import { evaluateHoldemHand } from '../../engine/poker/evaluator';
 import {
@@ -10,6 +10,11 @@ import {
   type PokerTableState,
   startNewHand,
 } from '../../engine/poker/gameState';
+import {
+  notifyPlayerTurn,
+  type RoomPacingMode,
+  savePersistedRoomState,
+} from '../../lib/multiplayer';
 import { Avatar3D } from './Avatar3D';
 import { CommunityCardSlot, HoleCardsBlock } from './PlayingCard';
 import { TopOpponentsRow } from './TopOpponentsRow';
@@ -19,6 +24,8 @@ interface PokerTableProps {
   onBack: () => void;
   onBroadcastState?: (newState: PokerTableState) => void;
   externalState?: PokerTableState | null;
+  roomName?: string;
+  pacingMode?: RoomPacingMode;
 }
 
 export const PokerTable: React.FC<PokerTableProps> = ({
@@ -26,11 +33,14 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   onBack,
   onBroadcastState,
   externalState,
+  roomName = 'Mesa Offsuit',
+  pacingMode = 'live',
 }) => {
   const [tableState, setTableState] = useState<PokerTableState>(initialState);
   const [isSliderOpen, setIsSliderOpen] = useState(false);
   const [sliderAmount, setSliderAmount] = useState<number>(initialState.minRaiseTo);
   const [hudOddsMode, setHudOddsMode] = useState<boolean>(false);
+  const prevTurnIndexRef = useRef<number>(initialState.currentTurnIndex);
 
   useEffect(() => {
     if (externalState) {
@@ -55,7 +65,29 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     setIsSliderOpen(false);
   }, [tableState.handNumber, tableState.street, minRaiseBet]);
 
-  // Bot turn automation
+  // Trigger PWA / Web Notification when turn transitions from an opponent to Hero in async mode
+  useEffect(() => {
+    const wasOpponentTurn = prevTurnIndexRef.current !== 0;
+    prevTurnIndexRef.current = tableState.currentTurnIndex;
+
+    if (
+      wasOpponentTurn &&
+      tableState.currentTurnIndex === 0 &&
+      tableState.street !== 'showdown' &&
+      hero.status === 'active'
+    ) {
+      if (pacingMode === 'async' || (typeof document !== 'undefined' && document.hidden)) {
+        void notifyPlayerTurn(roomName, tableState.roomId, tableState);
+      }
+    }
+  }, [
+    tableState,
+    hero.status,
+    pacingMode,
+    roomName,
+  ]);
+
+  // Sequential bot turn automation (~550ms per opponent)
   useEffect(() => {
     if (tableState.street === 'showdown') return;
     const currentActor = tableState.players[tableState.currentTurnIndex];
@@ -67,8 +99,9 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       const decision = getBotDecision(tableState, currentActor.id);
       const next = applyPlayerAction(tableState, currentActor.id, decision);
       setTableState(next);
+      savePersistedRoomState(next.roomId, next);
       onBroadcastState?.(next);
-    }, 520);
+    }, 550);
 
     return () => window.clearTimeout(timer);
   }, [tableState, onBroadcastState]);
@@ -116,6 +149,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     const next = applyPlayerAction(tableState, hero.id, action);
     setIsSliderOpen(false);
     setTableState(next);
+    savePersistedRoomState(next.roomId, next);
     onBroadcastState?.(next);
   };
 
@@ -141,6 +175,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   const handleDealNextHand = () => {
     const next = startNewHand(tableState, false);
     setTableState(next);
+    savePersistedRoomState(next.roomId, next);
     onBroadcastState?.(next);
   };
 
@@ -149,7 +184,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       <div className="w-full max-w-[420px] min-h-[100dvh] flex flex-col justify-between px-4 pt-3 pb-6">
         {/* TOP SECTION: Back Arrow ONLY + 5 Opponents Row */}
         <div>
-          <div className="h-10 flex items-center justify-between mb-2">
+          <div className="h-10 flex items-center justify-start mb-2">
             <button
               type="button"
               onClick={onBack}
@@ -158,23 +193,13 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             >
               <ArrowLeft className="w-6 h-6 stroke-[2]" />
             </button>
-
-            {/* Subtle Fold action only when hero is facing a bet & wants to fold */}
-            {isHeroTurn && toCall > 0 && !isSliderOpen && (
-              <button
-                type="button"
-                onClick={() => handleHeroAction({ type: 'fold' })}
-                className="text-[12px] text-[#7c7d85] hover:text-white px-2.5 py-1 rounded-full transition-colors cursor-pointer"
-              >
-                Fold
-              </button>
-            )}
           </div>
 
           <TopOpponentsRow
             opponents={opponents}
             dealerIndex={tableState.dealerIndex}
             currentTurnIndex={tableState.currentTurnIndex}
+            isShowdown={tableState.street === 'showdown'}
           />
         </div>
 
@@ -335,12 +360,14 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             </div>
           )}
 
-          {/* BOTTOM SPLIT HUD: Left (2 Hole Cards) | Right (Tappable Player/Odds Card) */}
+          {/* BOTTOM SPLIT HUD: Left (2 Draggable/Flickable Hole Cards) | Right (Tappable Player/Odds Card) */}
           <div className="grid grid-cols-2 gap-3 h-[142px] items-stretch relative">
-            {/* Left Column: Unified 2 Hole Cards */}
+            {/* Left Column: Unified 2 Hole Cards with Throw-to-Fold upward flick gesture */}
             <HoleCardsBlock
               cards={hero.holeCards}
               folded={hero.status === 'folded'}
+              canDragToFold={isHeroTurn}
+              onFoldTrigger={() => handleHeroAction({ type: 'fold' })}
             />
 
             {/* Right Column: Dark Rounded HUD Container */}

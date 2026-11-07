@@ -5,11 +5,20 @@ import {
   createInitialTableState,
   type PokerTableState,
 } from './engine/poker/gameState';
+import {
+  getOrInitRoomState,
+  loadOpenRooms,
+  type RoomPacingMode,
+  savePersistedRoomState,
+  upsertOpenRoom,
+} from './lib/multiplayer';
 import { connectToPokerRoom, type RoomSyncHandle } from './lib/supabase';
 
 export function App() {
   const [view, setView] = useState<'table' | 'lobby'>('table');
   const [roomCode, setRoomCode] = useState<string>('OFFSUIT');
+  const [roomName, setRoomName] = useState<string>('Mesa Offsuit');
+  const [pacingMode, setPacingMode] = useState<RoomPacingMode>('live');
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [tableState, setTableState] = useState<PokerTableState>(() =>
     createInitialTableState('OFFSUIT')
@@ -26,6 +35,7 @@ export function App() {
       (incomingState) => {
         setExternalState(incomingState);
         setTableState(incomingState);
+        savePersistedRoomState(roomCode, incomingState);
       },
       (count) => setOnlineCount(count)
     );
@@ -36,16 +46,43 @@ export function App() {
     };
   }, [roomCode]);
 
-  const handleBroadcastState = useCallback((nextState: PokerTableState) => {
-    setTableState(nextState);
-    syncRef.current?.broadcastState(nextState);
-  }, []);
+  const handleBroadcastState = useCallback(
+    (nextState: PokerTableState) => {
+      setTableState(nextState);
+      savePersistedRoomState(roomCode, nextState);
+      syncRef.current?.broadcastState(nextState);
+    },
+    [roomCode]
+  );
 
-  const handleJoinOrCreateRoom = (newCode: string) => {
-    const fresh = createInitialTableState(newCode);
-    setRoomCode(newCode);
-    setTableState(fresh);
-    setExternalState(fresh);
+  const handleJoinOrCreateRoom = (
+    newCode: string,
+    mode?: RoomPacingMode,
+    customName?: string
+  ) => {
+    const normalized = newCode.trim().toUpperCase();
+    const existingRoom = loadOpenRooms().find((r) => r.code === normalized);
+    const resolvedMode: RoomPacingMode = mode ?? existingRoom?.pacingMode ?? 'live';
+    const resolvedName = customName ?? existingRoom?.name ?? `Sala #${normalized}`;
+
+    upsertOpenRoom({
+      code: normalized,
+      name: resolvedName,
+      pacingMode: resolvedMode,
+      playerCount: existingRoom?.playerCount ?? 2,
+      maxPlayers: 6,
+      blindsLabel: existingRoom?.blindsLabel ?? '1/2',
+      turnTimerSeconds: resolvedMode === 'live' ? 20 : null,
+      currentTurnPlayerName: existingRoom?.currentTurnPlayerName ?? 'Tú',
+      updatedAt: Date.now(),
+    });
+
+    const roomState = getOrInitRoomState(normalized);
+    setRoomCode(normalized);
+    setRoomName(resolvedName);
+    setPacingMode(resolvedMode);
+    setTableState(roomState);
+    setExternalState(roomState);
     setView('table');
   };
 
@@ -53,6 +90,7 @@ export function App() {
     return (
       <Lobby
         activeRoomCode={roomCode}
+        activePacingMode={pacingMode}
         onlineCount={onlineCount}
         onStartInstantTable={() => setView('table')}
         onJoinOrCreateRoom={handleJoinOrCreateRoom}
@@ -64,6 +102,8 @@ export function App() {
     <PokerTable
       initialState={tableState}
       externalState={externalState}
+      roomName={roomName}
+      pacingMode={pacingMode}
       onBack={() => setView('lobby')}
       onBroadcastState={handleBroadcastState}
     />

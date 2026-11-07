@@ -125,4 +125,24 @@ describe('Poker Table State Machine', () => {
     expect(nextState.players[0].stack).toBe(198);
     expect(nextState.currentTurnIndex).toBe(1); // Emma's turn
   });
+
+  it('supports Hero Throw-to-Fold action and advances turn sequentially through opponents', () => {
+    let state = createInitialTableState('PRIMOS');
+    expect(state.currentTurnIndex).toBe(0);
+
+    // Hero throws cards to fold
+    state = applyPlayerAction(state, 'hero', { type: 'fold' });
+    expect(state.players[0].status).toBe('folded');
+    expect(state.players[0].lastAction).toBe('Fold');
+    expect(state.currentTurnIndex).toBe(1); // Advances sequentially to Emma (seat 1)
+
+    // Emma raises to 6
+    state = applyPlayerAction(state, 'bot-emma', { type: 'raise', raiseToAmount: 6 });
+    expect(state.currentTurnIndex).toBe(2); // Advances to Leo (seat 2)
+
+    // Leo folds
+    state = applyPlayerAction(state, 'bot-leo', { type: 'fold' });
+    expect(state.currentTurnIndex).toBe(3); // Advances to Akash (seat 3)
+  });
 });
+
