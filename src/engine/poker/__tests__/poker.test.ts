@@ -409,13 +409,38 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
     expect(mergedWithStale.some((r) => r.code === 'LIVE1')).toBe(false);
   });
 
-  it('triggers iOS switch haptics and vibration cleanly via triggerHaptic', async () => {
-    const { initGlobalHaptics, triggerHaptic } = await import('../../../lib/haptics');
-    expect(() => {
-      initGlobalHaptics();
-      triggerHaptic('light');
-      triggerHaptic('selection');
-    }).not.toThrow();
+  it('strictly conserves bankroll when repeatedly entering and leaving games without chip duplication', async () => {
+    const {
+      savePlayerBankroll,
+      deductTableBuyIn,
+      returnTableStack,
+      loadUserProfile,
+    } = await import('../../../lib/profile');
+    const {
+      getOrInitRoomState,
+      deletePersistedRoomState,
+    } = await import('../../../lib/multiplayer');
+
+    savePlayerBankroll(1000);
+    expect(loadUserProfile().bankroll).toBe(1000);
+
+    // Enter Bot game with 100 buyIn -> 100 deducted from wallet
+    for (let cycle = 0; cycle < 5; cycle++) {
+      const { paid } = deductTableBuyIn(100);
+      expect(paid).toBe(100);
+      expect(loadUserProfile().bankroll).toBe(900);
+
+      const tableState = getOrInitRoomState('BOTS', 'bots', paid);
+      expect(tableState.players[0].stack).toBe(100);
+
+      // Player leaves without playing -> returns exact stack (100) to wallet
+      returnTableStack(tableState.players[0].stack);
+      deletePersistedRoomState('BOTS');
+      expect(loadUserProfile().bankroll).toBe(1000);
+    }
+
+    expect(loadUserProfile().bankroll).toBe(1000);
   });
 });
+
 

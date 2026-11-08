@@ -594,6 +594,17 @@ export function savePersistedRoomState(roomCode: string, state: PokerTableState)
   }
 }
 
+export function deletePersistedRoomState(roomCode: string): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    const normalized = roomCode.trim().toUpperCase();
+    const key = `${ROOM_STATE_PREFIX}${normalized}`;
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 export function getOrInitRoomState(
   roomCode: string,
   roomMode: RoomPlayersMode = 'real',
@@ -601,10 +612,22 @@ export function getOrInitRoomState(
 ): PokerTableState {
   const normalized = roomCode.trim().toUpperCase();
   const profile = loadUserProfile();
-  const saved = loadPersistedRoomState(normalized);
-  const targetBuyIn =
-    buyIn ?? saved?.tableBuyIn ?? (roomMode === 'bots' ? 100 : 200);
+  const targetBuyIn = buyIn ?? (roomMode === 'bots' ? 100 : 200);
 
+  // Bot practice sessions are always clean, fresh tables with the paid buy-in
+  if (roomMode === 'bots' || normalized === 'BOTS') {
+    const fresh = createInitialTableState(normalized, 'bots', false, targetBuyIn);
+    const { state: seatedFresh } = seatPlayerInTable(fresh, {
+      id: profile.playerId,
+      name: profile.name || 'Jugador',
+      avatarId: profile.avatarId,
+      stack: targetBuyIn,
+    });
+    savePersistedRoomState(normalized, seatedFresh);
+    return seatedFresh;
+  }
+
+  const saved = loadPersistedRoomState(normalized);
   if (
     saved &&
     Array.isArray(saved.players) &&

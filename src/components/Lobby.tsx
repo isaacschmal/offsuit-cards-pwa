@@ -228,52 +228,53 @@ export const Lobby: React.FC<LobbyProps> = ({
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#16171a] border border-[#23252a] text-[12px] font-medium text-[#eab308]">
-                    <span>🪙</span>
-                    <span>{profile.bankroll.toLocaleString('en-US')}</span>
-                  </div>
-
-                  {/* Orange Circular Level Progress Ring with Level Number inside */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('profile')}
-                    aria-label={`Nivel ${profile.level}`}
-                    className="relative w-9 h-9 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
-                  >
-                    <svg className="w-9 h-9 -rotate-90" viewBox="0 0 38 38">
-                      <circle
-                        cx="19"
-                        cy="19"
-                        r={levelRadius}
-                        fill="none"
-                        stroke="#23252a"
-                        strokeWidth="3.2"
-                      />
-                      <circle
-                        cx="19"
-                        cy="19"
-                        r={levelRadius}
-                        fill="none"
-                        stroke="#f97316"
-                        strokeWidth="3.2"
-                        strokeLinecap="round"
-                        strokeDasharray={levelCircumference}
-                        strokeDashoffset={strokeDashoffset}
-                      />
-                    </svg>
-                    <span className="absolute text-[13px] font-semibold text-[#fb923c] leading-none">
-                      {profile.level}
-                    </span>
-                  </button>
-                </div>
+                {/* Orange Circular Level Progress Ring with Level Number inside */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('profile')}
+                  aria-label={`Nivel ${profile.level}`}
+                  className="relative w-9 h-9 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
+                >
+                  <svg className="w-9 h-9 -rotate-90" viewBox="0 0 38 38">
+                    <circle
+                      cx="19"
+                      cy="19"
+                      r={levelRadius}
+                      fill="none"
+                      stroke="#23252a"
+                      strokeWidth="3.2"
+                    />
+                    <circle
+                      cx="19"
+                      cy="19"
+                      r={levelRadius}
+                      fill="none"
+                      stroke="#f97316"
+                      strokeWidth="3.2"
+                      strokeLinecap="round"
+                      strokeDasharray={levelCircumference}
+                      strokeDashoffset={strokeDashoffset}
+                    />
+                  </svg>
+                  <span className="absolute text-[13px] font-semibold text-[#fb923c] leading-none">
+                    {profile.level}
+                  </span>
+                </button>
               </div>
 
-              {/* HERO COUNTER: Giant Ultra-Light XP Balance (Left-aligned like 516 in image.png) */}
-              <div className="my-3.5 px-5 flex items-center justify-start text-left shrink-0">
-                <span className="font-extralight text-[64px] tracking-tight leading-none text-white">
-                  {profile.xp}
+              {/* HERO COUNTER: Giant Ultra-Light Bankroll Balance (Saldo Total) */}
+              <div className="my-3.5 px-5 flex flex-col items-start text-left shrink-0">
+                <span className="text-[12px] font-medium text-[#9ca3af] tracking-wide uppercase">
+                  Saldo Total
                 </span>
+                <div className="flex items-baseline gap-2 mt-0.5">
+                  <span className="font-extralight text-[64px] tracking-tight leading-none text-white">
+                    {profile.bankroll.toLocaleString('en-US')}
+                  </span>
+                  <span className="text-[17px] font-medium text-[#eab308]">
+                    fichas
+                  </span>
+                </div>
               </div>
 
               {/* BANKRUPTCY RECOVERY BONUS BANNER (When bankroll is 0) */}

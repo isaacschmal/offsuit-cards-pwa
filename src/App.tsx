@@ -8,9 +8,9 @@ import {
   type RoomPlayersMode,
 } from './engine/poker/gameState';
 import {
+  deletePersistedRoomState,
   getOrInitRoomState,
   loadOpenRooms,
-  loadPersistedRoomState,
   type RoomPacingMode,
   savePersistedRoomState,
   upsertOpenRoom,
@@ -70,17 +70,9 @@ export function App() {
           ? Math.min(100, buyIn ?? existingRoom?.buyIn ?? 100)
           : (buyIn ?? existingRoom?.buyIn ?? 200);
 
-      // Check if user is already seated in this room with an active stack
-      const existingSaved = loadPersistedRoomState(normalized);
-      const profile = loadUserProfile();
-      const seatedHero = existingSaved?.players?.find((p) => p.id === profile.playerId);
-      const alreadyHasStack = seatedHero && seatedHero.stack > 0;
-
-      let effectiveStack = targetBuyIn;
-      if (!alreadyHasStack) {
-        const { paid } = deductTableBuyIn(targetBuyIn);
-        effectiveStack = paid;
-      }
+      // Buy-in is deducted from wallet upon entering table
+      const { paid } = deductTableBuyIn(targetBuyIn);
+      const effectiveStack = paid;
 
       const roomState = getOrInitRoomState(
         normalized,
@@ -95,6 +87,7 @@ export function App() {
       const actualBuyIn = roomState.tableBuyIn ?? targetBuyIn;
       const sb = Math.max(1, Math.round(actualBuyIn / 100));
       const bb = Math.max(2, Math.round(actualBuyIn / 50));
+      const profile = loadUserProfile();
 
       upsertOpenRoom({
         code: normalized,
@@ -174,20 +167,39 @@ export function App() {
     [roomCode]
   );
 
-  const handleLeaveTableToLobby = useCallback((finalStack?: number) => {
-    pendingUrlRoomRef.current = null;
-    if (typeof finalStack === 'number' && finalStack > 0) {
-      returnTableStack(finalStack);
-    }
-    if (typeof window !== 'undefined' && window.history?.replaceState) {
-      try {
-        window.history.replaceState({}, '', window.location.pathname);
-      } catch {
-        // ignore history API errors
+  const handleLeaveTableToLobby = useCallback(
+    (finalStack?: number) => {
+      pendingUrlRoomRef.current = null;
+      if (typeof finalStack === 'number' && finalStack > 0) {
+        returnTableStack(finalStack);
       }
-    }
-    setView('lobby');
-  }, []);
+      // Clean up table state upon cashing out so chips do not remain duplicate on the table
+      if (roomCode === 'BOTS' || tableState.roomMode === 'bots') {
+        deletePersistedRoomState(roomCode);
+      } else {
+        const profile = loadUserProfile();
+        const updatedPlayers = tableState.players.map((p) =>
+          p.id === profile.playerId
+            ? { ...p, stack: 0, status: 'out' as const }
+            : p
+        );
+        savePersistedRoomState(roomCode, {
+          ...tableState,
+          players: updatedPlayers,
+          stateVersion: (tableState.stateVersion ?? 1) + 1,
+        });
+      }
+      if (typeof window !== 'undefined' && window.history?.replaceState) {
+        try {
+          window.history.replaceState({}, '', window.location.pathname);
+        } catch {
+          // ignore history API errors
+        }
+      }
+      setView('lobby');
+    },
+    [roomCode, tableState]
+  );
 
   if (view === 'lobby') {
     return (
