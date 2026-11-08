@@ -208,8 +208,8 @@ export const Lobby: React.FC<LobbyProps> = ({
               {/* TOP BAR: Subtle Title + Player Name on Left + Orange Circular Level Progress Ring on Right */}
               <div className="flex items-center justify-between h-10 px-5 shrink-0">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-[13.5px] font-medium text-[#9ca3af] tracking-tight">
+                  <img src="/favicon.svg" alt="Logo" className="w-[18px] h-[18px] rounded-[4px] object-contain shrink-0" />
+                  <span className="text-[13.5px] font-medium text-[#d1d5db] tracking-tight">
                     Juegos de Cartas
                   </span>
                   {profile.hasSetCustomName && (
