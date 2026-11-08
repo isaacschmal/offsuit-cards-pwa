@@ -3,6 +3,8 @@
   "short_name": "Cartas",
   "description": "Juegos de Cartas multijugador en vivo y por turnos",
   "start_url": "/",
+  "scope": "/",
+  "id": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#000000",
