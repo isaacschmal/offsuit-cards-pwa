@@ -269,6 +269,7 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
       buildMqttPublishPacket,
       createNewOpenRoom,
       parseMqttPublishPackets,
+      shouldAcceptIncomingState,
     } = await import('../../../lib/multiplayer');
 
     expect(DEFAULT_OPEN_ROOMS).toEqual([]);
@@ -289,5 +290,57 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
       type: 'table_state',
       roomId: 'AMIGOS',
     });
+
+    // Verify monotonic stateVersion and authoritative dealer hand start when Player 2 joins
+    let hostState = createInitialTableState('AMIGOS', 'real');
+    hostState = seatPlayerInTable(hostState, {
+      id: 'p_host',
+      name: 'Isaac',
+      avatarId: 'hero',
+      stack: 240,
+    }).state;
+    expect(hostState.players[0].stack).toBe(240);
+    expect(getSeatedPlayersCount(hostState.players)).toBe(1);
+
+    const p2Joined = seatPlayerInTable(hostState, {
+      id: 'p_friend',
+      name: 'Leo',
+      avatarId: 'leo',
+      stack: 200,
+    }).state;
+    expect(getSeatedPlayersCount(p2Joined.players)).toBe(2);
+    expect(p2Joined.stateVersion).toBeGreaterThan(hostState.stateVersion ?? 0);
+
+    // Reject stale 1-player state when 2 players are already seated
+    expect(shouldAcceptIncomingState(p2Joined, hostState)).toBe(false);
+    // Accept newer versioned state after an action
+    const afterAction = applyPlayerAction(
+      p2Joined,
+      p2Joined.players[p2Joined.currentTurnIndex].id,
+      { type: 'call' }
+    );
+    expect(afterAction.stateVersion).toBeGreaterThan(p2Joined.stateVersion ?? 0);
+    expect(shouldAcceptIncomingState(p2Joined, afterAction)).toBe(true);
+    expect(shouldAcceptIncomingState(afterAction, p2Joined)).toBe(false);
+  });
+
+  it('protects player bankroll and cleanly folds mid-hand when leaving via forceFoldPlayerForLeave', async () => {
+    const { forceFoldPlayerForLeave } = await import('../gameState');
+    const { DEFAULT_USER_PROFILE, savePlayerBankroll } = await import('../../../lib/profile');
+
+    expect(DEFAULT_USER_PROFILE.bankroll).toBe(200);
+    const updatedProfile = savePlayerBankroll(185);
+    expect(updatedProfile.bankroll).toBe(185);
+    // Auto-replenish to 200 if stack hits 0
+    expect(savePlayerBankroll(0).bankroll).toBe(200);
+
+    let state = createInitialTableState('MESA1', 'real');
+    state = seatPlayerInTable(state, { id: 'p_1', name: 'Isaac', avatarId: 'hero' }).state;
+    state = seatPlayerInTable(state, { id: 'p_2', name: 'Leo', avatarId: 'leo' }).state;
+
+    // If p_1 leaves and folds mid-hand in a 2-player hand, p_2 immediately wins the pot at showdown
+    const folded = forceFoldPlayerForLeave(state, 'p_1');
+    expect(folded.street).toBe('showdown');
+    expect(folded.winnerIds).toContain('p_2');
   });
 });

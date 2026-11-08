@@ -72,6 +72,7 @@ export interface UserProfilePreferences {
   cardBackColor: CardBackColorId;
   xp: number;
   level: number;
+  bankroll: number;
   selectedEmote: string;
   unlockedEmotes: string[];
   friends: FriendEntry[];
@@ -93,6 +94,7 @@ export const DEFAULT_USER_PROFILE: UserProfilePreferences = {
   cardBackColor: 'slate',
   xp: 0,
   level: 1,
+  bankroll: 200,
   selectedEmote: '👋',
   unlockedEmotes: ['👋', '🔥', '😎', '🤝', '🍀', '🚀'],
   friends: [],
@@ -127,11 +129,14 @@ export function loadUserProfile(): UserProfilePreferences {
       typeof parsed.playerId === 'string' && parsed.playerId.trim().length > 0
         ? parsed.playerId
         : generatePlayerId();
+    const rawBankroll = typeof parsed.bankroll === 'number' ? parsed.bankroll : 200;
+    const resolvedBankroll = rawBankroll <= 0 ? 200 : rawBankroll;
     const resolved: UserProfilePreferences = {
       ...DEFAULT_USER_PROFILE,
       ...parsed,
       playerId: resolvedPlayerId,
       hasSetCustomName: Boolean(parsed.hasSetCustomName),
+      bankroll: resolvedBankroll,
       friends: Array.isArray(parsed.friends) ? parsed.friends : [],
       stats: {
         ...DEFAULT_USER_PROFILE.stats,
@@ -148,21 +153,27 @@ export function loadUserProfile(): UserProfilePreferences {
 }
 
 export function saveUserProfile(profile: UserProfilePreferences): UserProfilePreferences {
+  const safeBankroll =
+    typeof profile.bankroll === 'number' && profile.bankroll > 0 ? profile.bankroll : 200;
+  const normalized: UserProfilePreferences = {
+    ...profile,
+    bankroll: safeBankroll,
+  };
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
-      window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+      window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(normalized));
       upsertKnownPlayer({
-        id: profile.playerId,
-        name: profile.name || 'Jugador',
-        avatarId: profile.avatarId,
-        xp: profile.xp,
+        id: normalized.playerId,
+        name: normalized.name || 'Jugador',
+        avatarId: normalized.avatarId,
+        xp: normalized.xp,
       });
-      window.dispatchEvent(new CustomEvent('cartas-profile-updated', { detail: profile }));
+      window.dispatchEvent(new CustomEvent('cartas-profile-updated', { detail: normalized }));
     } catch {
       // ignore storage errors
     }
   }
-  return profile;
+  return normalized;
 }
 
 export function updateUserProfile(
@@ -172,10 +183,20 @@ export function updateUserProfile(
   const next = updater(current);
   // Automatically recalculate level based on XP (every 250 XP per level)
   const computedLevel = Math.max(1, Math.floor(next.xp / 250) + 1);
+  const safeBankroll = typeof next.bankroll === 'number' && next.bankroll > 0 ? next.bankroll : 200;
   return saveUserProfile({
     ...next,
     level: computedLevel,
+    bankroll: safeBankroll,
   });
+}
+
+export function savePlayerBankroll(stack: number): UserProfilePreferences {
+  const safeStack = stack <= 0 ? 200 : Math.round(stack);
+  return updateUserProfile((prev) => ({
+    ...prev,
+    bankroll: safeStack,
+  }));
 }
 
 export function loadKnownPlayers(): KnownPlayerEntry[] {

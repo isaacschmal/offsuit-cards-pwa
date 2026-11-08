@@ -188,360 +188,362 @@ export const Lobby: React.FC<LobbyProps> = ({
   }, [profile]);
 
   return (
-    <div className="min-h-[100dvh] w-full bg-black text-white flex justify-center select-none">
-      <div className="w-full max-w-[420px] min-h-[100dvh] flex flex-col justify-between px-5 pt-4 pb-6 relative">
-        {activeTab === 'home' ? (
-          <div className="flex flex-col pb-24">
-            {/* TOP BAR: Subtle Title + Player Name on Left + Orange Circular Level Progress Ring on Right */}
-            <div className="flex items-center justify-between h-11">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-[14px] font-medium text-[#9ca3af] tracking-tight">
-                  Juegos de Cartas
-                </span>
-                {profile.hasSetCustomName && (
-                  <span className="text-[12px] text-[#6b6d76]">
-                    · {profile.name}
+    <div className="h-[100dvh] max-h-[100dvh] overflow-hidden w-full bg-black text-white flex justify-center select-none">
+      <div className="w-full max-w-[420px] h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col justify-between px-5 pt-2 relative">
+        <div className="flex-1 overflow-y-auto no-scrollbar pb-2">
+          {activeTab === 'home' ? (
+            <div className="flex flex-col">
+              {/* TOP BAR: Subtle Title + Player Name on Left + Orange Circular Level Progress Ring on Right */}
+              <div className="flex items-center justify-between h-10 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="text-[13.5px] font-medium text-[#9ca3af] tracking-tight">
+                    Juegos de Cartas
                   </span>
-                )}
-              </div>
-
-              {/* Orange Circular Level Progress Ring with Level Number inside */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('profile')}
-                aria-label={`Nivel ${profile.level}`}
-                className="relative w-10 h-10 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
-              >
-                <svg className="w-10 h-10 -rotate-90" viewBox="0 0 38 38">
-                  <circle
-                    cx="19"
-                    cy="19"
-                    r={levelRadius}
-                    fill="none"
-                    stroke="#23252a"
-                    strokeWidth="3.2"
-                  />
-                  <circle
-                    cx="19"
-                    cy="19"
-                    r={levelRadius}
-                    fill="none"
-                    stroke="#f97316"
-                    strokeWidth="3.2"
-                    strokeLinecap="round"
-                    strokeDasharray={levelCircumference}
-                    strokeDashoffset={strokeDashoffset}
-                  />
-                </svg>
-                <span className="absolute text-[14px] font-semibold text-[#fb923c] leading-none">
-                  {profile.level}
-                </span>
-              </button>
-            </div>
-
-            {/* HERO COUNTER: Giant Ultra-Light XP Balance */}
-            <div className="my-9 flex flex-col items-center justify-center">
-              <span className="font-extralight text-[76px] tracking-tight leading-none text-white">
-                {profile.xp}
-              </span>
-            </div>
-
-            {/* HORIZONTAL PASTEL GRADIENT CARDS CAROUSEL (Strictly separated Real vs Bots) */}
-            <div className="flex gap-3.5 overflow-x-auto no-scrollbar -mx-5 px-5 pb-2 snap-x snap-mandatory">
-              {/* Card 1: Mesas en Vivo (Solo Reales · Sin Bots) */}
-              <button
-                type="button"
-                onClick={() => {
-                  const liveRealRoom = openRooms.find(
-                    (r) => r.pacingMode === 'live' && r.roomMode === 'real'
-                  );
-                  if (liveRealRoom) {
-                    onJoinOrCreateRoom(
-                      liveRealRoom.code,
-                      'live',
-                      liveRealRoom.name,
-                      'real'
-                    );
-                  } else {
-                    setSelectedRoomMode('real');
-                    setSelectedPacing('live');
-                    setIsRoomsModalOpen(true);
-                  }
-                }}
-                style={{
-                  background:
-                    'linear-gradient(135deg, #dce7ff 0%, #d8f3dc 100%)',
-                }}
-                className="snap-start shrink-0 min-w-[275px] h-[205px] rounded-[28px] p-5 flex flex-col justify-between text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
-              >
-                <div className="flex items-start justify-between w-full">
-                  <div>
-                    <span className="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1.5">
-                      👥 Solo Reales · En Vivo
+                  {profile.hasSetCustomName && (
+                    <span className="text-[12px] text-[#6b6d76]">
+                      · {profile.name}
                     </span>
-                    <h2 className="text-[22px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                      Mesas en Vivo
-                    </h2>
-                    <p className="text-[13px] text-[#334155] mt-1 leading-snug max-w-[195px]">
-                      Juega con amigos reales conectados (sin bots)
-                    </p>
-                  </div>
-                  <span className="text-[26px] leading-none">🌎</span>
+                  )}
                 </div>
 
-                <div className="flex items-center justify-between w-full pt-2">
-                  <span className="text-[12px] font-medium text-[#334155]">
-                    {liveRealRoomsCount > 0
-                      ? `${liveRealRoomsCount} ${
-                          liveRealRoomsCount === 1
-                            ? 'sala abierta'
-                            : 'salas abiertas'
-                        }`
-                      : 'Crea o únete con código'}
-                  </span>
-
-                  <span className="h-8 px-3.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[12px] font-semibold flex items-center">
-                    {liveRealRoomsCount > 0 ? 'Jugar →' : 'Abrir →'}
-                  </span>
-                </div>
-              </button>
-
-              {/* Card 2: Por Turnos (Solo Reales · 24h Async Chess-Style) */}
-              <button
-                type="button"
-                onClick={() => {
-                  const asyncRoom = openRooms.find(
-                    (r) => r.pacingMode === 'async' && r.roomMode === 'real'
-                  );
-                  if (asyncRoom) {
-                    onJoinOrCreateRoom(
-                      asyncRoom.code,
-                      'async',
-                      asyncRoom.name,
-                      'real'
-                    );
-                  } else {
-                    setSelectedRoomMode('real');
-                    setSelectedPacing('async');
-                    setIsRoomsModalOpen(true);
-                  }
-                }}
-                style={{
-                  background:
-                    'linear-gradient(135deg, #e0e7ff 0%, #fce7f3 100%)',
-                }}
-                className="snap-start shrink-0 min-w-[275px] h-[205px] rounded-[28px] p-5 flex flex-col justify-between text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
-              >
-                <div className="flex items-start justify-between w-full">
-                  <div>
-                    <span className="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1.5">
-                      👥 Solo Reales · 24h
-                    </span>
-                    <h2 className="text-[22px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                      Por Turnos
-                    </h2>
-                    <p className="text-[13px] text-[#334155] mt-1 leading-snug max-w-[195px]">
-                      Sin prisa entre amigos, te avisa cuando te toca
-                    </p>
-                  </div>
-                  <span className="text-[26px] leading-none">⏳</span>
-                </div>
-
-                <div className="flex items-center justify-between w-full pt-2">
-                  <div className="flex items-center gap-1.5 text-[12px] font-medium text-[#334155]">
-                    <span>Estilo ajedrez · Sin bots</span>
-                  </div>
-                  <span className="h-8 px-3.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[12px] font-semibold flex items-center">
-                    Entrar →
-                  </span>
-                </div>
-              </button>
-
-              {/* Card 3: Práctica vs Bots (Dedicated Solo AI Mode) */}
-              <button
-                type="button"
-                onClick={() => {
-                  onStartInstantTable();
-                }}
-                style={{
-                  background:
-                    'linear-gradient(135deg, #fef3c7 0%, #ffedd5 100%)',
-                }}
-                className="snap-start shrink-0 min-w-[275px] h-[205px] rounded-[28px] p-5 flex flex-col justify-between text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
-              >
-                <div className="flex items-start justify-between w-full">
-                  <div>
-                    <span className="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1.5">
-                      🤖 Modo Bots
-                    </span>
-                    <h2 className="text-[22px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                      Práctica vs Bots
-                    </h2>
-                    <p className="text-[13px] text-[#334155] mt-1 leading-snug max-w-[195px]">
-                      Entrena jugadas al instante contra los 5 bots IA
-                    </p>
-                  </div>
-                  <span className="text-[26px] leading-none">🤖</span>
-                </div>
-
-                <div className="flex items-center justify-between w-full pt-2">
-                  <span className="text-[12px] font-medium text-[#334155]">
-                    5 Bots IA · Turnos rápidos
-                  </span>
-                  <span className="h-8 px-3.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[12px] font-semibold flex items-center">
-                    Practicar →
-                  </span>
-                </div>
-              </button>
-            </div>
-
-            {/* ACTIVE OPEN ROOM QUICK BANNER OR EMPTY STATE */}
-            {primaryOpenRoom ? (
-              <div className="mt-3.5 bg-[#121316] border border-[#23252a] rounded-[20px] px-4 py-3 flex items-center justify-between gap-2">
+                {/* Orange Circular Level Progress Ring with Level Number inside */}
                 <button
                   type="button"
-                  onClick={() => setIsRoomsModalOpen(true)}
-                  className="flex flex-col text-left min-w-0 cursor-pointer"
+                  onClick={() => setActiveTab('profile')}
+                  aria-label={`Nivel ${profile.level}`}
+                  className="relative w-9 h-9 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
                 >
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[13px] font-medium text-white truncate">
-                      {primaryOpenRoom.name}
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-medium shrink-0">
-                      {primaryOpenRoom.roomMode === 'bots'
-                        ? '🤖 Bots'
-                        : '👥 Solo Reales'}
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-[#7c7d85] mt-0.5">
-                    #{primaryOpenRoom.code} · {primaryOpenRoom.playerCount}/
-                    {primaryOpenRoom.maxPlayers} · Ver salas ({openRooms.length})
+                  <svg className="w-9 h-9 -rotate-90" viewBox="0 0 38 38">
+                    <circle
+                      cx="19"
+                      cy="19"
+                      r={levelRadius}
+                      fill="none"
+                      stroke="#23252a"
+                      strokeWidth="3.2"
+                    />
+                    <circle
+                      cx="19"
+                      cy="19"
+                      r={levelRadius}
+                      fill="none"
+                      stroke="#f97316"
+                      strokeWidth="3.2"
+                      strokeLinecap="round"
+                      strokeDasharray={levelCircumference}
+                      strokeDashoffset={strokeDashoffset}
+                    />
+                  </svg>
+                  <span className="absolute text-[13px] font-semibold text-[#fb923c] leading-none">
+                    {profile.level}
                   </span>
                 </button>
+              </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
+              {/* HERO COUNTER: Giant Ultra-Light XP Balance */}
+              <div className="my-3.5 flex flex-col items-center justify-center shrink-0">
+                <span className="font-extralight text-[62px] tracking-tight leading-none text-white">
+                  {profile.xp}
+                </span>
+              </div>
+
+              {/* HORIZONTAL PASTEL GRADIENT CARDS CAROUSEL (Strictly separated Real vs Bots) */}
+              <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-5 px-5 pb-1.5 snap-x snap-mandatory shrink-0">
+                {/* Card 1: Mesas en Vivo (Solo Reales · Sin Bots) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const liveRealRoom = openRooms.find(
+                      (r) => r.pacingMode === 'live' && r.roomMode === 'real'
+                    );
+                    if (liveRealRoom) {
+                      onJoinOrCreateRoom(
+                        liveRealRoom.code,
+                        'live',
+                        liveRealRoom.name,
+                        'real'
+                      );
+                    } else {
+                      setSelectedRoomMode('real');
+                      setSelectedPacing('live');
+                      setIsRoomsModalOpen(true);
+                    }
+                  }}
+                  style={{
+                    background:
+                      'linear-gradient(135deg, #dce7ff 0%, #d8f3dc 100%)',
+                  }}
+                  className="snap-start shrink-0 min-w-[262px] h-[174px] rounded-[26px] p-4 flex flex-col justify-between text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
+                >
+                  <div className="flex items-start justify-between w-full">
+                    <div>
+                      <span className="inline-block text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1">
+                        👥 Solo Reales · En Vivo
+                      </span>
+                      <h2 className="text-[20px] font-semibold tracking-tight text-[#0f172a] leading-tight">
+                        Mesas en Vivo
+                      </h2>
+                      <p className="text-[12.5px] text-[#334155] mt-0.5 leading-snug max-w-[188px]">
+                        Juega con amigos reales conectados (sin bots)
+                      </p>
+                    </div>
+                    <span className="text-[24px] leading-none">🌎</span>
+                  </div>
+
+                  <div className="flex items-center justify-between w-full pt-1">
+                    <span className="text-[11.5px] font-medium text-[#334155]">
+                      {liveRealRoomsCount > 0
+                        ? `${liveRealRoomsCount} ${
+                            liveRealRoomsCount === 1
+                              ? 'sala abierta'
+                              : 'salas abiertas'
+                          }`
+                        : 'Crea o únete con código'}
+                    </span>
+
+                    <span className="h-7 px-3 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[11.5px] font-semibold flex items-center">
+                      {liveRealRoomsCount > 0 ? 'Jugar →' : 'Abrir →'}
+                    </span>
+                  </div>
+                </button>
+
+                {/* Card 2: Por Turnos (Solo Reales · 24h Async Chess-Style) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const asyncRoom = openRooms.find(
+                      (r) => r.pacingMode === 'async' && r.roomMode === 'real'
+                    );
+                    if (asyncRoom) {
+                      onJoinOrCreateRoom(
+                        asyncRoom.code,
+                        'async',
+                        asyncRoom.name,
+                        'real'
+                      );
+                    } else {
+                      setSelectedRoomMode('real');
+                      setSelectedPacing('async');
+                      setIsRoomsModalOpen(true);
+                    }
+                  }}
+                  style={{
+                    background:
+                      'linear-gradient(135deg, #e0e7ff 0%, #fce7f3 100%)',
+                  }}
+                  className="snap-start shrink-0 min-w-[262px] h-[174px] rounded-[26px] p-4 flex flex-col justify-between text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
+                >
+                  <div className="flex items-start justify-between w-full">
+                    <div>
+                      <span className="inline-block text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1">
+                        👥 Solo Reales · 24h
+                      </span>
+                      <h2 className="text-[20px] font-semibold tracking-tight text-[#0f172a] leading-tight">
+                        Por Turnos
+                      </h2>
+                      <p className="text-[12.5px] text-[#334155] mt-0.5 leading-snug max-w-[188px]">
+                        Sin prisa entre amigos, te avisa cuando te toca
+                      </p>
+                    </div>
+                    <span className="text-[24px] leading-none">⏳</span>
+                  </div>
+
+                  <div className="flex items-center justify-between w-full pt-1">
+                    <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-[#334155]">
+                      <span>Estilo ajedrez · Sin bots</span>
+                    </div>
+                    <span className="h-7 px-3 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[11.5px] font-semibold flex items-center">
+                      Entrar →
+                    </span>
+                  </div>
+                </button>
+
+                {/* Card 3: Práctica vs Bots (Dedicated Solo AI Mode) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStartInstantTable();
+                  }}
+                  style={{
+                    background:
+                      'linear-gradient(135deg, #fef3c7 0%, #ffedd5 100%)',
+                  }}
+                  className="snap-start shrink-0 min-w-[262px] h-[174px] rounded-[26px] p-4 flex flex-col justify-between text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
+                >
+                  <div className="flex items-start justify-between w-full">
+                    <div>
+                      <span className="inline-block text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1">
+                        🤖 Modo Bots
+                      </span>
+                      <h2 className="text-[20px] font-semibold tracking-tight text-[#0f172a] leading-tight">
+                        Práctica vs Bots
+                      </h2>
+                      <p className="text-[12.5px] text-[#334155] mt-0.5 leading-snug max-w-[188px]">
+                        Entrena jugadas al instante contra los 5 bots IA
+                      </p>
+                    </div>
+                    <span className="text-[24px] leading-none">🤖</span>
+                  </div>
+
+                  <div className="flex items-center justify-between w-full pt-1">
+                    <span className="text-[11.5px] font-medium text-[#334155]">
+                      5 Bots IA · Turnos rápidos
+                    </span>
+                    <span className="h-7 px-3 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[11.5px] font-semibold flex items-center">
+                      Practicar →
+                    </span>
+                  </div>
+                </button>
+              </div>
+
+              {/* ACTIVE OPEN ROOM QUICK BANNER OR EMPTY STATE */}
+              {primaryOpenRoom ? (
+                <div className="mt-2.5 bg-[#121316] border border-[#23252a] rounded-[18px] px-3.5 py-2.5 flex items-center justify-between gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => setIsRoomsModalOpen(true)}
-                    className="h-8 px-3 rounded-full bg-[#23252a] text-white text-[12px] font-medium active:scale-95 transition-transform cursor-pointer"
+                    className="flex flex-col text-left min-w-0 cursor-pointer"
                   >
-                    Salas
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[12.5px] font-medium text-white truncate">
+                        {primaryOpenRoom.name}
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-medium shrink-0">
+                        {primaryOpenRoom.roomMode === 'bots'
+                          ? '🤖 Bots'
+                          : '👥 Solo Reales'}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-[#7c7d85] mt-0.5">
+                      #{primaryOpenRoom.code} · {primaryOpenRoom.playerCount}/
+                      {primaryOpenRoom.maxPlayers} · Ver salas ({openRooms.length})
+                    </span>
                   </button>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIsRoomsModalOpen(true)}
+                      className="h-7 px-2.5 rounded-full bg-[#23252a] text-white text-[11.5px] font-medium active:scale-95 transition-transform cursor-pointer"
+                    >
+                      Salas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onJoinOrCreateRoom(
+                          primaryOpenRoom.code,
+                          primaryOpenRoom.pacingMode,
+                          primaryOpenRoom.name,
+                          primaryOpenRoom.roomMode
+                        )
+                      }
+                      className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-semibold active:scale-95 transition-transform cursor-pointer"
+                    >
+                      Unirse
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2.5 bg-[#121316] border border-[#23252a] rounded-[18px] px-3.5 py-2.5 flex items-center justify-between gap-3 shrink-0">
+                  <div className="flex flex-col text-left">
+                    <span className="text-[12px] font-medium text-white leading-snug">
+                      No hay salas abiertas en este momento
+                    </span>
+                    <span className="text-[10.5px] text-[#7c7d85] mt-0.5">
+                      Crea una sala y comparte el código con tus amigos
+                    </span>
+                  </div>
+
                   <button
                     type="button"
-                    onClick={() =>
-                      onJoinOrCreateRoom(
-                        primaryOpenRoom.code,
-                        primaryOpenRoom.pacingMode,
-                        primaryOpenRoom.name,
-                        primaryOpenRoom.roomMode
-                      )
-                    }
-                    className="h-8 px-3.5 rounded-full bg-white text-black text-[12px] font-semibold active:scale-95 transition-transform cursor-pointer"
+                    onClick={() => setIsRoomsModalOpen(true)}
+                    className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-semibold shrink-0 active:scale-95 transition-transform cursor-pointer"
                   >
-                    Unirse
+                    Crear Sala
                   </button>
                 </div>
-              </div>
-            ) : (
-              <div className="mt-3.5 bg-[#121316] border border-[#23252a] rounded-[20px] px-4 py-3.5 flex items-center justify-between gap-3">
-                <div className="flex flex-col text-left">
-                  <span className="text-[12.5px] font-medium text-white leading-snug">
-                    No hay salas abiertas en este momento
-                  </span>
-                  <span className="text-[11px] text-[#7c7d85] mt-0.5">
-                    Crea una sala y comparte el código con tus amigos
-                  </span>
+              )}
+
+              {/* WEEKLY LEADERBOARD SECTION (Strictly real players) */}
+              <div className="mt-4">
+                <div className="flex items-center justify-between px-1 mb-2">
+                  <h3 className="text-[16px] font-medium text-white tracking-tight">
+                    Weekly leaderboard
+                  </h3>
+                  <div className="flex items-center gap-1 text-[14px] font-medium text-[#9ca3af]">
+                    <span>{leaderboardEntries.length}</span>
+                    <span>🏆</span>
+                  </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setIsRoomsModalOpen(true)}
-                  className="h-8 px-3.5 rounded-full bg-white text-black text-[12px] font-semibold shrink-0 active:scale-95 transition-transform cursor-pointer"
-                >
-                  Crear Sala
-                </button>
-              </div>
-            )}
-
-            {/* WEEKLY LEADERBOARD SECTION (Strictly real players) */}
-            <div className="mt-7">
-              <div className="flex items-center justify-between px-1 mb-3">
-                <h3 className="text-[18px] font-medium text-white tracking-tight">
-                  Weekly leaderboard
-                </h3>
-                <div className="flex items-center gap-1 text-[15px] font-medium text-[#9ca3af]">
-                  <span>{leaderboardEntries.length}</span>
-                  <span>🏆</span>
-                </div>
-              </div>
-
-              <div className="bg-[#121316] border border-[#1d1f26] rounded-[24px] p-2.5 flex flex-col gap-1">
-                {leaderboardEntries.map((entry) => (
-                  <div
-                    key={`${entry.rank}-${entry.name}`}
-                    className={`flex items-center justify-between px-3 py-2.5 rounded-[16px] ${
-                      entry.isHero ? 'bg-white/[0.04]' : ''
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 flex items-center gap-1 text-[14px] font-medium text-[#9ca3af]">
-                        {entry.medal ? (
-                          <>
-                            <span className="text-[16px] leading-none">
-                              {entry.medal}
-                            </span>
-                            <span className="text-white font-semibold">
+                <div className="bg-[#121316] border border-[#1d1f26] rounded-[20px] p-2 flex flex-col gap-1">
+                  {leaderboardEntries.map((entry) => (
+                    <div
+                      key={`${entry.rank}-${entry.name}`}
+                      className={`flex items-center justify-between px-2.5 py-2 rounded-[14px] ${
+                        entry.isHero ? 'bg-white/[0.04]' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-10 flex items-center gap-1 text-[13px] font-medium text-[#9ca3af]">
+                          {entry.medal ? (
+                            <>
+                              <span className="text-[15px] leading-none">
+                                {entry.medal}
+                              </span>
+                              <span className="text-white font-semibold">
+                                {entry.rank}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="pl-5 text-[#7c7d85]">
                               {entry.rank}
                             </span>
-                          </>
-                        ) : (
-                          <span className="pl-5 text-[#7c7d85]">
-                            {entry.rank}
-                          </span>
-                        )}
-                      </div>
+                          )}
+                        </div>
 
-                      <div className="relative w-8 h-8 rounded-full bg-[#1c1e24] flex items-center justify-center">
-                        <Avatar3D avatarId={entry.avatarId} size={28} />
-                        <span className="absolute -bottom-1 -right-1 text-[11px] leading-none">
-                          {entry.badgeEmoji}
+                        <div className="relative w-7 h-7 rounded-full bg-[#1c1e24] flex items-center justify-center">
+                          <Avatar3D avatarId={entry.avatarId} size={26} />
+                          <span className="absolute -bottom-1 -right-1 text-[10px] leading-none">
+                            {entry.badgeEmoji}
+                          </span>
+                        </div>
+
+                        <span className="text-[14px] font-medium text-white">
+                          {entry.name}
                         </span>
                       </div>
 
-                      <span className="text-[15px] font-medium text-white">
-                        {entry.name}
+                      <span className="text-[13px] font-normal text-[#8e9099]">
+                        {entry.xpLabel}
                       </span>
                     </div>
+                  ))}
 
-                    <span className="text-[14px] font-normal text-[#8e9099]">
-                      {entry.xpLabel}
-                    </span>
-                  </div>
-                ))}
-
-                {leaderboardEntries.length === 1 && (
-                  <div className="px-3 py-2 text-[11px] text-[#7c7d85] text-center border-t border-[#1d1f26] mt-1">
-                    Solo tú estás registrado por ahora · Invita amigos a una sala para competir en el ranking
-                  </div>
-                )}
+                  {leaderboardEntries.length === 1 && (
+                    <div className="px-2 py-1.5 text-[10.5px] text-[#7c7d85] text-center border-t border-[#1d1f26] mt-0.5">
+                      Solo tú estás registrado por ahora · Invita amigos a una sala para competir en el ranking
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ) : (
-          <ProfileView
-            profile={profile}
-            activeRoomCode={activeRoomCode}
-            onProfileChange={setProfile}
-            onOpenCreateOrInviteModal={() => setIsRoomsModalOpen(true)}
-          />
-        )}
+          ) : (
+            <ProfileView
+              profile={profile}
+              activeRoomCode={activeRoomCode}
+              onProfileChange={setProfile}
+              onOpenCreateOrInviteModal={() => setIsRoomsModalOpen(true)}
+            />
+          )}
+        </div>
 
         {/* CLEAN 2-TAB BOTTOM NAVIGATION BAR (Home & Profile ONLY) */}
         <nav
           aria-label="Navegación principal"
-          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[420px] h-[68px] bg-black/95 backdrop-blur-md border-t border-[#16181d] px-12 flex items-center justify-around z-40"
+          className="w-full h-[56px] shrink-0 bg-black/95 backdrop-blur-md border-t border-[#16181d] px-10 flex items-center justify-around z-40"
         >
           <button
             type="button"
@@ -553,7 +555,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 : 'text-[#5e6068] hover:text-[#9ca3af]'
             }`}
           >
-            <Home className="w-6 h-6 stroke-[2]" />
+            <Home className="w-5 h-5 stroke-[2]" />
           </button>
 
           <button
@@ -566,7 +568,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 : 'text-[#5e6068] hover:text-[#9ca3af]'
             }`}
           >
-            <User className="w-6 h-6 stroke-[2]" />
+            <User className="w-5 h-5 stroke-[2]" />
           </button>
         </nav>
 

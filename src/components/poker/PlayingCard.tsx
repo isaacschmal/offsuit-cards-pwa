@@ -287,9 +287,9 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
 
   if (!first || !second) {
     return (
-      <div className="relative w-full h-[142px] flex items-center">
-        <OffsuitCardBack className="w-[58%] h-full rounded-[24px]" />
-        <OffsuitCardBack className="w-[58%] h-full rounded-[24px] -ml-[16%] shadow-[-10px_0_22px_rgba(0,0,0,0.28)]" />
+      <div className="relative w-full h-[128px] flex items-center">
+        <OffsuitCardBack className="w-[58%] h-full rounded-[22px]" />
+        <OffsuitCardBack className="w-[58%] h-full rounded-[22px] -ml-[16%] shadow-[-10px_0_22px_rgba(0,0,0,0.28)]" />
       </div>
     );
   }
@@ -334,7 +334,7 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
           ? { duration: 0.22, ease: 'easeOut' }
           : { type: 'spring', stiffness: 380, damping: 28 }
       }
-      className={`relative w-full h-[142px] flex items-stretch touch-none ${
+      className={`relative w-full h-[128px] flex items-stretch touch-none ${
         dragEnabled ? 'cursor-grab active:cursor-grabbing' : ''
       }`}
     >
@@ -348,17 +348,17 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
           delay: 0.12,
           ease: [0.22, 1, 0.36, 1],
         }}
-        className="w-[58%] h-full bg-white rounded-[24px] px-4 py-3.5 flex flex-col justify-between items-start"
+        className="w-[58%] h-full bg-white rounded-[22px] px-3.5 py-3 flex flex-col justify-between items-start"
       >
         <span
-          className={`text-[40px] font-normal leading-none tracking-tight ${
+          className={`text-[36px] font-normal leading-none tracking-tight ${
             firstRed ? 'text-[#ef4444]' : 'text-[#18181b]'
           }`}
         >
           {formatRank(first.rank)}
         </span>
         <div className="pl-0.5 pb-0.5">
-          <SuitGraphic suit={first.suit} size={26} />
+          <SuitGraphic suit={first.suit} size={24} />
         </div>
       </motion.div>
 
@@ -372,17 +372,17 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
           delay: 0.24,
           ease: [0.22, 1, 0.36, 1],
         }}
-        className="w-[58%] h-full bg-white rounded-[24px] px-4 py-3.5 flex flex-col justify-between items-start -ml-[16%] shadow-[-10px_0_24px_rgba(0,0,0,0.22)]"
+        className="w-[58%] h-full bg-white rounded-[22px] px-3.5 py-3 flex flex-col justify-between items-start -ml-[16%] shadow-[-10px_0_24px_rgba(0,0,0,0.22)]"
       >
         <span
-          className={`text-[40px] font-normal leading-none tracking-tight ${
+          className={`text-[36px] font-normal leading-none tracking-tight ${
             secondRed ? 'text-[#ef4444]' : 'text-[#18181b]'
           }`}
         >
           {formatRank(second.rank)}
         </span>
         <div className="pl-0.5 pb-0.5">
-          <SuitGraphic suit={second.suit} size={26} />
+          <SuitGraphic suit={second.suit} size={24} />
         </div>
       </motion.div>
     </motion.div>

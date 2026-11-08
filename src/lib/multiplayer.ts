@@ -185,26 +185,38 @@ export function connectMqttTopics(
     return { publish: () => {}, close: () => {} };
   }
 
-  let ws: WebSocket | null = null;
-  let isReady = false;
   let closed = false;
-  let pingTimer: ReturnType<typeof setInterval> | null = null;
-  const pendingPublishes: Array<{ topic: string; json: string; retain: boolean }> = [];
-  const clientId = `cartas_${Math.random().toString(36).slice(2, 10)}`;
+  const activeClients: Array<{
+    ws: WebSocket;
+    isReady: boolean;
+    pingTimer: ReturnType<typeof setInterval> | null;
+    pendingPublishes: Array<{ topic: string; json: string; retain: boolean }>;
+  }> = [];
 
-  const connectToBroker = (brokerIndex: number) => {
-    if (closed || brokerIndex >= MQTT_BROKER_URLS.length) return;
+  // Connect to ALL configured MQTT WebSocket brokers in parallel for dual-broker redundancy
+  MQTT_BROKER_URLS.forEach((brokerUrl, brokerIdx) => {
     try {
-      const socket = new WebSocket(MQTT_BROKER_URLS[brokerIndex], 'mqtt');
+      const socket = new WebSocket(brokerUrl, 'mqtt');
       socket.binaryType = 'arraybuffer';
-      ws = socket;
+      const clientId = `cartas_${brokerIdx}_${Math.random().toString(36).slice(2, 10)}`;
+      const clientEntry = {
+        ws: socket,
+        isReady: false,
+        pingTimer: null as ReturnType<typeof setInterval> | null,
+        pendingPublishes: [] as Array<{ topic: string; json: string; retain: boolean }>,
+      };
+      activeClients.push(clientEntry);
 
       socket.onopen = () => {
         if (closed) {
           socket.close();
           return;
         }
-        socket.send(buildMqttConnectPacket(clientId));
+        try {
+          socket.send(buildMqttConnectPacket(clientId));
+        } catch {
+          // ignore
+        }
       };
 
       socket.onmessage = (ev) => {
@@ -214,18 +226,30 @@ export function connectMqttTopics(
 
         const packetType = (bytes[0] >> 4) & 0x0f;
         // CONNACK = 2
-        if (packetType === 2 && !isReady) {
-          isReady = true;
+        if (packetType === 2 && !clientEntry.isReady) {
+          clientEntry.isReady = true;
           topics.forEach((t, i) => {
-            socket.send(buildMqttSubscribePacket(t, i + 1));
+            try {
+              socket.send(buildMqttSubscribePacket(t, i + 1));
+            } catch {
+              // ignore
+            }
           });
-          while (pendingPublishes.length > 0) {
-            const item = pendingPublishes.shift()!;
-            socket.send(buildMqttPublishPacket(item.topic, item.json, item.retain));
+          while (clientEntry.pendingPublishes.length > 0) {
+            const item = clientEntry.pendingPublishes.shift()!;
+            try {
+              socket.send(buildMqttPublishPacket(item.topic, item.json, item.retain));
+            } catch {
+              // ignore
+            }
           }
-          pingTimer = setInterval(() => {
+          clientEntry.pingTimer = setInterval(() => {
             if (socket.readyState === WebSocket.OPEN) {
-              socket.send(new Uint8Array([0xc0, 0x00])); // PINGREQ
+              try {
+                socket.send(new Uint8Array([0xc0, 0x00])); // PINGREQ
+              } catch {
+                // ignore
+              }
             }
           }, 25_000);
           return;
@@ -243,45 +267,73 @@ export function connectMqttTopics(
       };
 
       socket.onerror = () => {
-        if (!isReady && !closed) {
-          try {
-            socket.close();
-          } catch {
-            // ignore
-          }
-          connectToBroker(brokerIndex + 1);
+        try {
+          socket.close();
+        } catch {
+          // ignore
         }
       };
     } catch {
-      connectToBroker(brokerIndex + 1);
+      // ignore broker init error
     }
-  };
-
-  connectToBroker(0);
+  });
 
   return {
     publish: (topic: string, data: unknown, retain = false) => {
+      if (closed) return;
       const json = JSON.stringify(data);
-      if (ws && ws.readyState === WebSocket.OPEN && isReady) {
-        try {
-          ws.send(buildMqttPublishPacket(topic, json, retain));
-        } catch {
-          // ignore send errors
+      for (const client of activeClients) {
+        if (client.ws.readyState === WebSocket.OPEN && client.isReady) {
+          try {
+            client.ws.send(buildMqttPublishPacket(topic, json, retain));
+          } catch {
+            // ignore send errors
+          }
+        } else if (client.ws.readyState === WebSocket.CONNECTING) {
+          client.pendingPublishes.push({ topic, json, retain });
         }
-      } else if (!closed) {
-        pendingPublishes.push({ topic, json, retain });
       }
     },
     close: () => {
       closed = true;
-      if (pingTimer) clearInterval(pingTimer);
-      try {
-        ws?.close();
-      } catch {
-        // ignore
+      for (const client of activeClients) {
+        if (client.pingTimer) clearInterval(client.pingTimer);
+        try {
+          client.ws.close();
+        } catch {
+          // ignore
+        }
       }
     },
   };
+}
+
+/**
+ * Determines whether an incoming PokerTableState should be accepted over the local state.
+ * Prevents stale retained messages or out-of-order packets from overwriting a newer turn or newly dealt hand.
+ */
+export function shouldAcceptIncomingState(
+  current: PokerTableState | null | undefined,
+  incoming: PokerTableState
+): boolean {
+  if (!current) return true;
+  if (current.roomId !== incoming.roomId) return true;
+
+  const incomingSeated = getSeatedPlayersCount(incoming.players);
+  const currentSeated = getSeatedPlayersCount(current.players);
+
+  // Always accept a state that has more real seated players than our local state
+  if (incomingSeated > currentSeated) return true;
+  // Never overwrite a multi-player table with a stale 1-player pre-deal state
+  if (currentSeated >= 2 && incomingSeated < 2) return false;
+
+  // Higher handNumber always wins
+  if (incoming.handNumber > current.handNumber) return true;
+  if (incoming.handNumber < current.handNumber) return false;
+
+  const incVer = incoming.stateVersion ?? 0;
+  const curVer = current.stateVersion ?? 0;
+  return incVer >= curVer;
 }
 
 export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [];
@@ -445,6 +497,7 @@ export function getOrInitRoomState(
       id: profile.playerId,
       name: profile.name || 'Jugador',
       avatarId: profile.avatarId,
+      stack: profile.bankroll,
     });
     savePersistedRoomState(normalized, withLocalPlayer);
     return withLocalPlayer;
@@ -455,6 +508,7 @@ export function getOrInitRoomState(
     id: profile.playerId,
     name: profile.name || 'Jugador',
     avatarId: profile.avatarId,
+    stack: profile.bankroll,
   });
   savePersistedRoomState(normalized, seatedFresh);
   return seatedFresh;

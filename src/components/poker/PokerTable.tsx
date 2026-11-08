@@ -5,6 +5,7 @@ import { calculateHoldemEquity } from '../../engine/poker/equity';
 import { evaluateHoldemHand } from '../../engine/poker/evaluator';
 import {
   applyPlayerAction,
+  forceFoldPlayerForLeave,
   getBotDecision,
   getSeatedPlayersCount,
   getTotalPot,
@@ -22,6 +23,7 @@ import {
   loadUserProfile,
   recordHandCompletedStats,
   recordPlayerActionStats,
+  savePlayerBankroll,
 } from '../../lib/profile';
 import { AnimatedNumber } from './AnimatedNumber';
 import { Avatar3D } from './Avatar3D';
@@ -51,6 +53,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   const [hudOddsMode, setHudOddsMode] = useState<boolean>(false);
   const [profileState, setProfileState] = useState(() => loadUserProfile());
   const [copiedRoomInvite, setCopiedRoomInvite] = useState(false);
+  const [isLeaveConfirmOpen, setIsLeaveConfirmOpen] = useState(false);
   const prevTurnIndexRef = useRef<number>(initialState.currentTurnIndex);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -106,6 +109,13 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     setSliderAmount(minRaiseBet);
     setIsSliderOpen(false);
   }, [tableState.handNumber, tableState.street, minRaiseBet]);
+
+  // Persist Hero's stack to bankroll on showdown
+  useEffect(() => {
+    if (tableState.street === 'showdown' && hero) {
+      savePlayerBankroll(hero.stack);
+    }
+  }, [tableState.street, hero]);
 
   // Trigger PWA / Web Notification when turn transitions from an opponent to Hero in async mode
   useEffect(() => {
@@ -191,12 +201,50 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     setTimeout(() => setCopiedRoomInvite(false), 2000);
   };
 
+  // Safe Back Button handler with Stack / Money Protection
+  const handleBackButtonClick = () => {
+    const hasActiveChipsInPot =
+      seatedCount >= 2 &&
+      tableState.street !== 'showdown' &&
+      hero.status === 'active' &&
+      hero.totalHandBet > 0;
+
+    if (hasActiveChipsInPot) {
+      setIsLeaveConfirmOpen(true);
+      return;
+    }
+
+    // 0 chips bet in current hand, showdown, or waiting for players -> save exact stack and exit immediately
+    savePlayerBankroll(hero.stack);
+    onBack();
+  };
+
+  const handleConfirmFoldAndLeave = () => {
+    recordPlayerActionStats({ type: 'fold' });
+    const foldedState = forceFoldPlayerForLeave(tableState, hero.id);
+    if (foldedState.street === 'showdown') {
+      recordHandCompletedStats(foldedState, hero.id);
+    }
+    const updatedHero =
+      foldedState.players[resolvedHeroIndex] ?? foldedState.players[0] ?? hero;
+    savePlayerBankroll(updatedHero.stack);
+    setTableState(foldedState);
+    savePersistedRoomState(foldedState.roomId, foldedState);
+    onBroadcastState?.(foldedState);
+    setIsLeaveConfirmOpen(false);
+    onBack();
+  };
+
   const handleHeroAction = (action: PlayerActionInput) => {
     if (!isHeroTurn) return;
     recordPlayerActionStats(action);
     const next = applyPlayerAction(tableState, hero.id, action);
     if (next.street === 'showdown') {
       recordHandCompletedStats(next, hero.id);
+    }
+    const nextHero = next.players[resolvedHeroIndex] ?? next.players[0];
+    if (nextHero) {
+      savePlayerBankroll(nextHero.stack);
     }
     setIsSliderOpen(false);
     setTableState(next);
@@ -302,16 +350,16 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     : 0;
 
   return (
-    <div className="min-h-[100dvh] w-full bg-black text-white flex justify-center select-none">
-      <div className="w-full max-w-[420px] min-h-[100dvh] flex flex-col justify-between px-4 pt-3 pb-6">
+    <div className="h-[100dvh] max-h-[100dvh] overflow-hidden w-full bg-black text-white flex justify-center select-none">
+      <div className="w-full max-w-[420px] h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col justify-between px-4 pt-2 pb-3 relative">
         {/* TOP SECTION: Back Arrow + Mode/Invite Badge + 5 Opponents Row */}
-        <div>
-          <div className="h-10 flex items-center justify-between mb-2">
+        <div className="shrink-0">
+          <div className="h-10 flex items-center justify-between mb-1">
             <button
               type="button"
-              onClick={onBack}
+              onClick={handleBackButtonClick}
               aria-label="Back"
-              className="w-9 h-9 flex items-center justify-start text-white active:opacity-60 cursor-pointer"
+              className="z-30 w-11 h-11 -ml-1 flex items-center justify-center rounded-full text-white active:bg-white/10 touch-manipulation cursor-pointer"
             >
               <ArrowLeft className="w-6 h-6 stroke-[2]" />
             </button>
@@ -320,7 +368,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               <button
                 type="button"
                 onClick={handleShareRoomLink}
-                className="text-[11px] px-3 py-1 rounded-full font-medium border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+                className="z-20 text-[11px] px-3 py-1 rounded-full font-medium border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
               >
                 {copiedRoomInvite ? (
                   <>
@@ -352,7 +400,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
         </div>
 
         {/* CENTER SECTION: 5 Community Cards + Bare Animated Pot Number */}
-        <div className="my-auto py-4">
+        <div className="my-auto py-1.5 shrink-0">
           <div className="grid grid-cols-5 items-center w-full">
             {[0, 1, 2, 3, 4].map((slotIdx) => (
               <CommunityCardSlot
@@ -365,21 +413,21 @@ export const PokerTable: React.FC<PokerTableProps> = ({
           </div>
 
           {/* Bare Pot Number directly below the 5th (rightmost) community card */}
-          <div className="w-full flex justify-end pr-2 mt-2.5">
+          <div className="w-full flex justify-end pr-2 mt-1.5">
             <AnimatedNumber
               value={tableState.collectedPot}
-              className="text-[22px] font-normal text-white leading-none"
+              className="text-[20px] font-normal text-white leading-none"
             />
           </div>
         </div>
 
         {/* BOTTOM SECTION: Action Controls + Split 2-Column HUD */}
-        <div className="flex flex-col gap-3.5">
+        <div className="flex flex-col gap-2 shrink-0">
           {/* Hero's own current round bet badge + status indicator */}
-          <div className="min-h-[24px] flex items-center justify-between px-2">
+          <div className="min-h-[22px] flex items-center justify-between px-2">
             <div>
               {hero.currentBet > 0 && (
-                <div className="min-w-[24px] h-[24px] px-1.5 rounded-full bg-[#1a1b1f] text-[#eab308] text-[12px] font-semibold flex items-center justify-center">
+                <div className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-[#1a1b1f] text-[#eab308] text-[11.5px] font-semibold flex items-center justify-center">
                   <AnimatedNumber value={hero.currentBet} />
                 </div>
               )}
@@ -431,11 +479,11 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
           {/* Action Controls Row */}
           {tableState.street === 'showdown' ? (
-            <div className="h-[50px] flex items-center gap-2.5">
+            <div className="h-[46px] flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleDealNextHand}
-                className="w-full h-[50px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[15px] font-medium flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
+                className="w-full h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-medium flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
               >
                 <span>
                   {tableState.winnerIds.includes(hero.id)
@@ -452,10 +500,10 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             </div>
           ) : isSliderOpen ? (
             /* CUSTOM RAISE SLIDER MODE */
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
               {/* Top slider row: ↑ <amount> | slider | white circle confirm ↑ */}
-              <div className="flex items-center gap-4 px-1 h-[36px]">
-                <div className="flex items-center gap-1 min-w-[52px] text-white text-[15px] font-medium">
+              <div className="flex items-center gap-3.5 px-1 h-[32px]">
+                <div className="flex items-center gap-1 min-w-[48px] text-white text-[14px] font-medium">
                   <ArrowUp className="w-3.5 h-3.5 stroke-[2.4]" />
                   <span>{sliderAmount}</span>
                 </div>
@@ -479,32 +527,32 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                     handleHeroAction({ type: 'raise', raiseToAmount: sliderAmount })
                   }
                   aria-label="Confirm Raise"
-                  className="w-[34px] h-[34px] rounded-full bg-white text-black flex items-center justify-center shrink-0 active:scale-95 disabled:opacity-40 cursor-pointer"
+                  className="w-[32px] h-[32px] rounded-full bg-white text-black flex items-center justify-center shrink-0 active:scale-95 disabled:opacity-40 cursor-pointer"
                 >
                   <ArrowUp className="w-4 h-4 stroke-[2.5]" />
                 </button>
               </div>
 
               {/* Bottom presets row: [1 BB] [1/2 Pot] [Pot] [✕] */}
-              <div className="flex items-center gap-2.5 h-[50px]">
+              <div className="flex items-center gap-2 h-[46px]">
                 <button
                   type="button"
                   onClick={() => handlePresetSelect('1bb')}
-                  className="flex-1 h-[50px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[15px] font-normal active:bg-[#1f2025] cursor-pointer"
+                  className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-normal active:bg-[#1f2025] cursor-pointer"
                 >
                   1 BB
                 </button>
                 <button
                   type="button"
                   onClick={() => handlePresetSelect('half-pot')}
-                  className="flex-1 h-[50px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[15px] font-normal active:bg-[#1f2025] cursor-pointer"
+                  className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-normal active:bg-[#1f2025] cursor-pointer"
                 >
                   1/2 Pot
                 </button>
                 <button
                   type="button"
                   onClick={() => handlePresetSelect('pot')}
-                  className="flex-1 h-[50px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[15px] font-normal active:bg-[#1f2025] cursor-pointer"
+                  className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-normal active:bg-[#1f2025] cursor-pointer"
                 >
                   Pot
                 </button>
@@ -512,7 +560,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                   type="button"
                   onClick={() => setIsSliderOpen(false)}
                   aria-label="Close Raise Slider"
-                  className="w-[50px] h-[50px] rounded-full bg-[#16171a] border border-[#23252a] text-white flex items-center justify-center shrink-0 active:bg-[#1f2025] cursor-pointer"
+                  className="w-[46px] h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white flex items-center justify-center shrink-0 active:bg-[#1f2025] cursor-pointer"
                 >
                   <X className="w-4 h-4 stroke-[2]" />
                 </button>
@@ -520,14 +568,14 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             </div>
           ) : (
             /* DEFAULT ACTION MODE */
-            <div className="flex items-center gap-2.5 h-[50px]">
+            <div className="flex items-center gap-2 h-[46px]">
               <button
                 type="button"
                 disabled={!isHeroTurn}
                 onClick={() =>
                   handleHeroAction({ type: toCall === 0 ? 'check' : 'call' })
                 }
-                className="flex-1 h-[50px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[16px] font-normal active:bg-[#1f2025] disabled:opacity-45 cursor-pointer"
+                className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[15px] font-normal active:bg-[#1f2025] disabled:opacity-45 cursor-pointer"
               >
                 {toCall === 0 ? 'Check' : `Call ${toCall}`}
               </button>
@@ -538,7 +586,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                 onClick={() =>
                   handleHeroAction({ type: 'raise', raiseToAmount: minRaiseBet })
                 }
-                className="flex-1 h-[50px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[16px] font-normal active:bg-[#1f2025] disabled:opacity-45 cursor-pointer"
+                className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[15px] font-normal active:bg-[#1f2025] disabled:opacity-45 cursor-pointer"
               >
                 Raise {minRaiseBet}
               </button>
@@ -548,7 +596,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                 disabled={!isHeroTurn || hero.stack <= toCall}
                 onClick={() => setIsSliderOpen(true)}
                 aria-label="Custom Raise Slider"
-                className="w-[50px] h-[50px] rounded-full bg-[#16171a] border border-[#23252a] text-white flex items-center justify-center shrink-0 active:bg-[#1f2025] disabled:opacity-45 cursor-pointer"
+                className="w-[46px] h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white flex items-center justify-center shrink-0 active:bg-[#1f2025] disabled:opacity-45 cursor-pointer"
               >
                 <ArrowUp className="w-4 h-4 stroke-[2]" />
               </button>
@@ -556,7 +604,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
           )}
 
           {/* BOTTOM SPLIT HUD: Left (2 Draggable/Flickable Hole Cards) | Right (Swipeable Player/Odds Widget) */}
-          <div className="grid grid-cols-2 gap-3 h-[142px] items-stretch relative">
+          <div className="grid grid-cols-2 gap-3 h-[128px] items-stretch relative">
             {/* Left Column: Unified 2 Hole Cards with dealing animation + Throw-to-Fold upward flick gesture */}
             <HoleCardsBlock
               cards={hero.holeCards}
@@ -567,7 +615,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             />
 
             {/* Right Column: Swipeable Dark Rounded HUD Container (Swipe Up/Down or Left/Right to switch faces) */}
-            <div className="relative h-[142px]">
+            <div className="relative h-[128px]">
               <div
                 role="region"
                 aria-label="Desliza para cambiar entre ficha de jugador y probabilidades"
@@ -576,7 +624,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                 onTouchStart={handleWidgetTouchStart}
                 onTouchEnd={handleWidgetTouchEnd}
                 onWheel={handleWidgetWheel}
-                className="w-full h-full bg-[#16171a] rounded-[24px] py-3 px-4 flex flex-col items-center justify-between text-center overflow-hidden touch-none select-none cursor-ns-resize"
+                className="w-full h-full bg-[#16171a] rounded-[22px] py-2.5 px-3.5 flex flex-col items-center justify-between text-center overflow-hidden touch-none select-none cursor-ns-resize"
               >
                 <AnimatePresence mode="wait" initial={false}>
                   {!hudOddsMode ? (
@@ -589,14 +637,14 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                       transition={{ duration: 0.2, ease: 'easeOut' }}
                       className="w-full h-full flex flex-col items-center justify-between"
                     >
-                      <span className="text-[12px] font-medium text-[#7c7d85] leading-none">
+                      <span className="text-[11.5px] font-medium text-[#7c7d85] leading-none">
                         {heroHandEval.categoryName}
                       </span>
 
                       <div className="my-auto relative flex items-center justify-center">
-                        <Avatar3D avatarId={profileState.avatarId} size={48} />
+                        <Avatar3D avatarId={profileState.avatarId} size={44} />
                         {tableState.dealerIndex === resolvedHeroIndex && (
-                          <div className="absolute -bottom-0.5 -right-1 w-[16px] h-[16px] rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center shadow">
+                          <div className="absolute -bottom-0.5 -right-1 w-[15px] h-[15px] rounded-full bg-white text-black text-[9.5px] font-bold flex items-center justify-center shadow">
                             D
                           </div>
                         )}
@@ -605,7 +653,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                       <AnimatedNumber
                         value={hero.stack}
                         flashColorOnChange={true}
-                        className="text-[20px] font-normal leading-none"
+                        className="text-[19px] font-normal leading-none"
                       />
                     </motion.div>
                   ) : (
@@ -616,22 +664,22 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 22 }}
                       transition={{ duration: 0.2, ease: 'easeOut' }}
-                      className="w-full h-full flex flex-col items-center justify-center gap-2.5"
+                      className="w-full h-full flex flex-col items-center justify-center gap-2"
                     >
                       <div className="flex flex-col items-center">
-                        <span className="text-[12px] font-medium text-[#7c7d85] leading-tight">
+                        <span className="text-[11px] font-medium text-[#7c7d85] leading-tight">
                           Win
                         </span>
-                        <span className="text-[22px] font-normal text-[#f59e0b] leading-tight mt-0.5">
+                        <span className="text-[20px] font-normal text-[#f59e0b] leading-tight mt-0.5">
                           {heroEquity.winPct}%
                         </span>
                       </div>
 
                       <div className="flex flex-col items-center">
-                        <span className="text-[12px] font-medium text-[#7c7d85] leading-tight">
+                        <span className="text-[11px] font-medium text-[#7c7d85] leading-tight">
                           {heroEquity.nextHandLabel}
                         </span>
-                        <span className="text-[22px] font-normal text-white leading-tight mt-0.5">
+                        <span className="text-[20px] font-normal text-white leading-tight mt-0.5">
                           {heroEquity.nextHandPct}%
                         </span>
                       </div>
@@ -656,6 +704,47 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             </div>
           </div>
         </div>
+
+        {/* LEAVE MID-HAND CONFIRMATION MODAL (Stack Protection) */}
+        {isLeaveConfirmOpen && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-[360px] bg-[#16171b] border border-[#282a33] rounded-[24px] p-5 flex flex-col gap-4 shadow-2xl">
+              <div className="flex flex-col gap-1.5 text-center">
+                <h3 className="text-[17px] font-semibold text-white">
+                  ¿Salir de la mesa?
+                </h3>
+                <p className="text-[13px] text-[#9ca3af] leading-snug">
+                  Tienes{' '}
+                  <strong className="text-[#eab308] font-semibold">
+                    {hero.totalHandBet} fichas
+                  </strong>{' '}
+                  apostadas en esta mano. Puedes quedarte a terminarla o hacer Fold y salir guardando tus{' '}
+                  <strong className="text-white font-semibold">
+                    {hero.stack} fichas
+                  </strong>{' '}
+                  restantes.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsLeaveConfirmOpen(false)}
+                  className="w-full h-11 rounded-full bg-white text-black text-[14px] font-semibold active:scale-95 transition-transform cursor-pointer"
+                >
+                  Seguir jugando
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmFoldAndLeave}
+                  className="w-full h-11 rounded-full bg-[#23252a] text-[#ef4444] text-[13.5px] font-semibold active:scale-95 transition-transform cursor-pointer"
+                >
+                  Hacer Fold y salir ({hero.stack} fichas)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

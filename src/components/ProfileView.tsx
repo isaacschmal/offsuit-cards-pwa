@@ -225,35 +225,35 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const cardBackIndex = CARD_BACK_ORDER.indexOf(profile.cardBackColor) + 1;
 
   return (
-    <div className="flex flex-col pb-24 pt-2">
+    <div className="flex flex-col pt-3 pb-2">
       {/* Top Row: Settings Gear on Right + Centered Avatar & Editable Name */}
-      <div className="relative flex flex-col items-center pt-2 pb-5">
+      <div className="relative flex flex-col items-center pb-2.5">
         <button
           type="button"
           onClick={() => setActiveSheet('settings')}
           aria-label="Configuración"
-          className="absolute right-0 top-1 w-10 h-10 rounded-full flex items-center justify-center text-[#8e9099] hover:text-white active:scale-95 transition-all cursor-pointer"
+          className="absolute right-0 top-0 w-9 h-9 rounded-full flex items-center justify-center text-[#8e9099] hover:text-white active:scale-95 transition-all cursor-pointer"
         >
-          <Settings className="w-6 h-6 stroke-[1.8]" />
+          <Settings className="w-5 h-5 stroke-[1.8]" />
         </button>
 
-        {/* Centered 3D Avatar with small edit badge (✎) — opens Profile Editor Modal */}
+        {/* Centered 3D Avatar with small edit badge (✎) — full 72px circular avatar never cut off at top */}
         <div className="relative">
           <button
             type="button"
             onClick={handleOpenProfileEditor}
-            className="w-[84px] h-[84px] rounded-full bg-[#16181d] border border-[#25272e] flex items-center justify-center overflow-hidden active:scale-95 transition-transform cursor-pointer"
+            className="w-[72px] h-[72px] rounded-full bg-[#16181d] border border-[#25272e] flex items-center justify-center overflow-hidden active:scale-95 transition-transform cursor-pointer"
             title="Editar nombre y avatar"
           >
-            <Avatar3D avatarId={profile.avatarId} size={74} />
+            <Avatar3D avatarId={profile.avatarId} size={64} />
           </button>
           <button
             type="button"
             onClick={handleOpenProfileEditor}
             aria-label="Editar perfil"
-            className="absolute -bottom-0.5 -right-0.5 w-7 h-7 rounded-full bg-[#1e2028] border border-[#323540] text-white flex items-center justify-center shadow-md cursor-pointer"
+            className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-[#1e2028] border border-[#323540] text-white flex items-center justify-center shadow-md cursor-pointer"
           >
-            <Pencil className="w-3.5 h-3.5" />
+            <Pencil className="w-3 h-3" />
           </button>
         </div>
 
@@ -261,26 +261,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <button
           type="button"
           onClick={handleOpenProfileEditor}
-          className="mt-2.5 text-[22px] font-medium text-white tracking-tight hover:opacity-80 cursor-pointer"
+          className="mt-1.5 text-[19px] font-medium text-white tracking-tight hover:opacity-80 cursor-pointer leading-tight"
         >
           {profile.name || 'Jugador'}
         </button>
       </div>
 
       {/* 2x2 Action Pills + Full-Width Rank Progress Pill */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2">
         {/* Top-left: 👫 Amigos pill (real friend count) */}
         <button
           type="button"
           onClick={() => setActiveSheet('friends')}
-          className="h-[66px] rounded-[20px] bg-[#141519] border border-[#22242a] px-4 flex items-center gap-3 text-left active:scale-[0.99] transition-transform cursor-pointer"
+          className="h-[54px] rounded-[18px] bg-[#141519] border border-[#22242a] px-3.5 flex items-center gap-2.5 text-left active:scale-[0.99] transition-transform cursor-pointer"
         >
-          <span className="text-[24px] leading-none">👫</span>
+          <span className="text-[21px] leading-none">👫</span>
           <div className="flex flex-col">
-            <span className="text-[15px] font-medium text-white leading-tight">
+            <span className="text-[14px] font-medium text-white leading-tight">
               Amigos
             </span>
-            <span className="text-[12px] text-[#7c7d85] mt-0.5">
+            <span className="text-[11px] text-[#7c7d85]">
               {profile.friends.length}{' '}
               {profile.friends.length === 1 ? 'agregado' : 'agregados'}
             </span>
@@ -291,12 +291,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <button
           type="button"
           onClick={onOpenCreateOrInviteModal}
-          className="h-[66px] rounded-[20px] bg-[#141519] border-2 border-white px-4 flex flex-col items-center justify-center text-center active:scale-[0.99] transition-transform cursor-pointer"
+          className="h-[54px] rounded-[18px] bg-[#141519] border-2 border-white px-3 flex flex-col items-center justify-center text-center active:scale-[0.99] transition-transform cursor-pointer"
         >
-          <span className="text-[13px] font-bold tracking-wider text-white uppercase leading-tight">
+          <span className="text-[12px] font-bold tracking-wider text-white uppercase leading-tight">
             CREAR SALA
           </span>
-          <span className="text-[10px] font-medium text-white/75 tracking-wide uppercase mt-0.5">
+          <span className="text-[9.5px] font-medium text-white/75 tracking-wide uppercase mt-0.5">
             INVITAR AMIGOS
           </span>
         </button>
@@ -305,17 +305,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveSheet('emotes')}
-          className="h-[68px] rounded-[20px] bg-[#141519] border border-[#22242a] px-4 flex items-center gap-3 text-left active:scale-[0.99] transition-transform cursor-pointer"
+          className="h-[54px] rounded-[18px] bg-[#141519] border border-[#22242a] px-3.5 flex items-center gap-2.5 text-left active:scale-[0.99] transition-transform cursor-pointer"
         >
-          <span className="text-[26px] leading-none">{profile.selectedEmote}</span>
+          <span className="text-[22px] leading-none">{profile.selectedEmote}</span>
           <div className="flex flex-col">
             <div className="flex items-baseline gap-1">
-              <span className="text-[15px] font-semibold text-white">
+              <span className="text-[14px] font-semibold text-white leading-tight">
                 {profile.unlockedEmotes.length}
               </span>
-              <span className="text-[13px] text-[#7c7d85]">(24)</span>
+              <span className="text-[11.5px] text-[#7c7d85]">(24)</span>
             </div>
-            <span className="text-[12px] text-[#7c7d85]">Emotes</span>
+            <span className="text-[11px] text-[#7c7d85]">Emotes</span>
           </div>
         </button>
 
@@ -323,28 +323,28 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveSheet('cardBacks')}
-          className="h-[68px] rounded-[20px] bg-[#141519] border border-[#22242a] px-3.5 flex items-center gap-3 text-left active:scale-[0.99] transition-transform cursor-pointer"
+          className="h-[54px] rounded-[18px] bg-[#141519] border border-[#22242a] px-3 flex items-center gap-2.5 text-left active:scale-[0.99] transition-transform cursor-pointer"
         >
-          <div className="w-8 h-11 shrink-0">
+          <div className="w-7 h-9 shrink-0">
             <OffsuitCardBack
               colorId={profile.cardBackColor}
-              className="w-full h-full !rounded-[7px] !p-[1.5px]"
+              className="w-full h-full !rounded-[6px] !p-[1.5px]"
             />
           </div>
           <div className="flex flex-col min-w-0">
             <div className="flex items-baseline gap-1">
-              <span className="text-[15px] font-semibold text-white">
+              <span className="text-[14px] font-semibold text-white leading-tight">
                 {cardBackIndex}
               </span>
-              <span className="text-[13px] text-[#7c7d85]">(20)</span>
+              <span className="text-[11.5px] text-[#7c7d85]">(20)</span>
             </div>
-            <span className="text-[12px] text-[#7c7d85] truncate">Card backs</span>
+            <span className="text-[11px] text-[#7c7d85] truncate">Card backs</span>
           </div>
         </button>
       </div>
 
       {/* Quick Card Back Color Swatches Row */}
-      <div className="mt-2.5 flex items-center justify-between bg-[#111216] border border-[#1f2127] rounded-[16px] px-3.5 py-2">
+      <div className="mt-2 flex items-center justify-between bg-[#111216] border border-[#1f2127] rounded-[14px] px-3 py-1.5">
         <span className="text-[11px] text-[#7c7d85]">
           Dorso activo:{' '}
           <strong className="text-white font-medium">
@@ -361,7 +361,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 type="button"
                 onClick={() => handleSelectCardBack(cid)}
                 aria-label={`Color de dorso ${theme.name}`}
-                className={`w-5 h-5 rounded-full transition-transform cursor-pointer ${
+                className={`w-4 h-4 rounded-full transition-transform cursor-pointer ${
                   isSelected ? 'ring-2 ring-white scale-110' : 'opacity-65 hover:opacity-100'
                 }`}
                 style={{ backgroundColor: theme.hex }}
@@ -375,51 +375,51 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       <button
         type="button"
         onClick={() => setActiveSheet('rank')}
-        className="mt-3 w-full rounded-[20px] bg-[#141519] border border-[#22242a] px-4 py-3.5 flex items-center gap-3.5 text-left active:scale-[0.99] transition-transform cursor-pointer"
+        className="mt-2 w-full rounded-[18px] bg-[#141519] border border-[#22242a] px-3.5 py-2.5 flex items-center gap-3 text-left active:scale-[0.99] transition-transform cursor-pointer"
       >
-        <span className="text-[26px] leading-none">🦐</span>
-        <div className="flex-1 flex flex-col gap-1.5">
+        <span className="text-[22px] leading-none">🦐</span>
+        <div className="flex-1 flex flex-col gap-1">
           <div className="flex items-center justify-between">
-            <span className="text-[15px] font-medium text-white leading-none">
+            <span className="text-[14px] font-medium text-white leading-none">
               Shrimp
             </span>
             <span className="text-[11px] text-[#7c7d85]">
-              Nivel {profile.level} · {profile.xp} XP
+              Nivel {profile.level} · {profile.xp} XP · {profile.bankroll} fichas
             </span>
           </div>
-          <div className="w-full h-[5px] rounded-full bg-[#25272f] overflow-hidden">
+          <div className="w-full h-[4.5px] rounded-full bg-[#25272f] overflow-hidden">
             <div
               className="h-full rounded-full bg-gradient-to-r from-[#f43f5e] to-[#fb923c] transition-all duration-300"
               style={{ width: `${rankProgressPct}%` }}
             />
           </div>
-          <span className="text-[11px] text-[#7c7d85] leading-none">
+          <span className="text-[10.5px] text-[#7c7d85] leading-none">
             Rank progress
           </span>
         </div>
       </button>
 
       {/* Statistics Section + Playstyle Diamond Radar Chart */}
-      <div className="mt-7">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-[20px] font-semibold text-white tracking-tight">
+      <div className="mt-3">
+        <div className="flex items-center justify-between mb-0.5">
+          <h2 className="text-[17px] font-semibold text-white tracking-tight">
             Statistics
           </h2>
-          <span className="text-[12px] text-[#7c7d85]">
+          <span className="text-[11px] text-[#7c7d85]">
             {profile.stats.handsPlayed} manos jugadas
           </span>
         </div>
 
         {!hasPlayedHands && (
-          <p className="text-[12px] text-[#8e9099] mb-2">
+          <p className="text-[11px] text-[#8e9099] mb-1">
             Sin partidas aún · Juega manos para ver tu estilo
           </p>
         )}
 
         <div className="w-full flex flex-col items-center">
           <svg
-            viewBox="0 0 360 300"
-            className="w-full max-w-[360px] h-auto overflow-visible select-none"
+            viewBox="0 10 360 280"
+            className="w-full max-w-[300px] max-h-[210px] h-auto overflow-visible select-none"
           >
             <defs>
               <linearGradient

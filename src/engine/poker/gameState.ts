@@ -14,6 +14,8 @@ export type RoomPlayersMode = 'real' | 'bots';
 export interface PokerTableState {
   roomId: string;
   roomMode?: RoomPlayersMode;
+  stateVersion?: number;
+  updatedBy?: string;
   players: Player[]; // index 0 is host/hero, 1..5 are seats 1..5
   deck: Card[];
   communityCards: Card[]; // 0, 3, 4, or 5 revealed cards
@@ -108,6 +110,8 @@ export function createInitialTableState(
   const baseState: PokerTableState = {
     roomId,
     roomMode,
+    stateVersion: 0,
+    updatedBy: 'system',
     players,
     deck: [],
     communityCards: [],
@@ -136,11 +140,15 @@ export function createInitialTableState(
  */
 export function seatPlayerInTable(
   state: PokerTableState,
-  participant: { id: string; name: string; avatarId: string }
+  participant: { id: string; name: string; avatarId: string; stack?: number }
 ): { state: PokerTableState; changed: boolean } {
   if (!participant.id) return { state, changed: false };
   const cleanName = participant.name.trim() || 'Jugador';
   const cleanAvatar = participant.avatarId || 'hero';
+  const initialStack =
+    typeof participant.stack === 'number' && participant.stack > 0
+      ? Math.round(participant.stack)
+      : 200;
 
   // In bots mode, just keep seat 0 updated with local player's identity
   if (state.roomMode === 'bots') {
@@ -156,7 +164,12 @@ export function seatPlayerInTable(
         avatarId: cleanAvatar,
       };
       return {
-        state: { ...state, players: updatedPlayers },
+        state: {
+          ...state,
+          players: updatedPlayers,
+          stateVersion: (state.stateVersion ?? 1) + 1,
+          updatedBy: participant.id,
+        },
         changed: true,
       };
     }
@@ -175,7 +188,12 @@ export function seatPlayerInTable(
         avatarId: cleanAvatar,
       };
       return {
-        state: { ...state, players: updatedPlayers },
+        state: {
+          ...state,
+          players: updatedPlayers,
+          stateVersion: (state.stateVersion ?? 1) + 1,
+          updatedBy: participant.id,
+        },
         changed: true,
       };
     }
@@ -190,9 +208,15 @@ export function seatPlayerInTable(
       id: participant.id,
       name: cleanName,
       avatarId: cleanAvatar,
+      stack: initialStack,
     };
     return {
-      state: { ...state, players: updatedPlayers },
+      state: {
+        ...state,
+        players: updatedPlayers,
+        stateVersion: (state.stateVersion ?? 1) + 1,
+        updatedBy: participant.id,
+      },
       changed: true,
     };
   }
@@ -209,7 +233,7 @@ export function seatPlayerInTable(
     id: participant.id,
     name: cleanName,
     avatarId: cleanAvatar,
-    stack: 200,
+    stack: initialStack,
     currentBet: 0,
     totalHandBet: 0,
     holeCards: [],
@@ -229,6 +253,7 @@ export function seatPlayerInTable(
         ...state,
         players: updatedPlayers,
         handNumber: Math.max(0, state.handNumber - 1),
+        updatedBy: state.players[0]?.id ?? participant.id,
       },
       false
     );
@@ -241,7 +266,12 @@ export function seatPlayerInTable(
     status: 'folded',
   };
   return {
-    state: { ...state, players: updatedPlayers },
+    state: {
+      ...state,
+      players: updatedPlayers,
+      stateVersion: (state.stateVersion ?? 1) + 1,
+      updatedBy: participant.id,
+    },
     changed: true,
   };
 }
@@ -354,6 +384,8 @@ export function startNewHand(
     );
     return {
       ...prevState,
+      stateVersion: (prevState.stateVersion ?? 0) + 1,
+      updatedBy: prevState.updatedBy ?? prevState.players[loneIdx]?.id ?? 'dealer',
       players: playersWithCards,
       deck: deck.slice(deckCursor),
       communityCards: [],
@@ -403,6 +435,8 @@ export function startNewHand(
 
   return {
     ...prevState,
+    stateVersion: (prevState.stateVersion ?? 0) + 1,
+    updatedBy: prevState.updatedBy ?? playersWithCards[dealerIndex]?.id ?? 'dealer',
     players: playersWithCards,
     deck: deck.slice(deckCursor),
     communityCards: [],
@@ -646,6 +680,7 @@ export function applyPlayerAction(
   const player = state.players[playerIdx];
   if (player.status !== 'active' || isVacantSeat(player)) return state;
 
+  const nextVersion = (state.stateVersion ?? 1) + 1;
   const updatedPlayers = [...state.players];
   let currentHighestBet = state.currentHighestBet;
   let lastRaiseIncrement = state.lastRaiseIncrement;
@@ -724,6 +759,8 @@ export function applyPlayerAction(
   if (remainingNonFolded.length <= 1) {
     return advanceStreetOrShowdown({
       ...state,
+      stateVersion: nextVersion,
+      updatedBy: playerId,
       players: updatedPlayers,
       currentHighestBet,
       lastRaiseIncrement,
@@ -744,6 +781,8 @@ export function applyPlayerAction(
   if (allActiveActedAndMatched || activePlayers.length === 0) {
     return advanceStreetOrShowdown({
       ...state,
+      stateVersion: nextVersion,
+      updatedBy: playerId,
       players: updatedPlayers,
       currentHighestBet,
       lastRaiseIncrement,
@@ -756,11 +795,65 @@ export function applyPlayerAction(
 
   return {
     ...state,
+    stateVersion: nextVersion,
+    updatedBy: playerId,
     players: updatedPlayers,
     currentTurnIndex: nextTurnIndex,
     currentHighestBet,
     lastRaiseIncrement,
     minRaiseTo,
+    actedPlayerIds,
+  };
+}
+
+/**
+ * Cleanly folds a player who chooses "Hacer Fold y salir" mid-hand, even if it wasn't currently their turn,
+ * so the table never freezes for the remaining friends.
+ */
+export function forceFoldPlayerForLeave(
+  state: PokerTableState,
+  playerId: string
+): PokerTableState {
+  if (state.street === 'showdown') return state;
+  const playerIdx = state.players.findIndex((p) => p.id === playerId);
+  if (playerIdx === -1) return state;
+
+  const player = state.players[playerIdx];
+  if (player.status !== 'active' || isVacantSeat(player)) return state;
+
+  if (state.currentTurnIndex === playerIdx) {
+    return applyPlayerAction(state, playerId, { type: 'fold' });
+  }
+
+  const nextVersion = (state.stateVersion ?? 1) + 1;
+  const updatedPlayers = [...state.players];
+  updatedPlayers[playerIdx] = {
+    ...player,
+    status: 'folded',
+    lastAction: 'Fold',
+  };
+  const actedPlayerIds = state.actedPlayerIds.includes(playerId)
+    ? [...state.actedPlayerIds]
+    : [...state.actedPlayerIds, playerId];
+
+  const remainingNonFolded = updatedPlayers.filter(
+    (p) => !isVacantSeat(p) && p.status !== 'folded' && p.status !== 'out'
+  );
+  if (remainingNonFolded.length <= 1) {
+    return advanceStreetOrShowdown({
+      ...state,
+      stateVersion: nextVersion,
+      updatedBy: playerId,
+      players: updatedPlayers,
+      actedPlayerIds,
+    });
+  }
+
+  return {
+    ...state,
+    stateVersion: nextVersion,
+    updatedBy: playerId,
+    players: updatedPlayers,
     actedPlayerIds,
   };
 }

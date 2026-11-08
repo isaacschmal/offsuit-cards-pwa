@@ -143,6 +143,18 @@ export function App() {
     [roomCode]
   );
 
+  const handleLeaveTableToLobby = useCallback(() => {
+    pendingUrlRoomRef.current = null;
+    if (typeof window !== 'undefined' && window.history?.replaceState) {
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {
+        // ignore history API errors
+      }
+    }
+    setView('lobby');
+  }, []);
+
   if (view === 'lobby') {
     return (
       <Lobby
@@ -163,7 +175,7 @@ export function App() {
       externalState={externalState}
       roomName={roomName}
       pacingMode={pacingMode}
-      onBack={() => setView('lobby')}
+      onBack={handleLeaveTableToLobby}
       onBroadcastState={handleBroadcastState}
     />
   );
