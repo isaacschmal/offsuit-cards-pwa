@@ -11,6 +11,7 @@ import {
   deletePersistedRoomState,
   getOrInitRoomState,
   loadOpenRooms,
+  loadPersistedRoomState,
   type RoomPacingMode,
   savePersistedRoomState,
   upsertOpenRoom,
@@ -70,9 +71,22 @@ export function App() {
           ? Math.min(100, buyIn ?? existingRoom?.buyIn ?? 100)
           : (buyIn ?? existingRoom?.buyIn ?? 200);
 
-      // Buy-in is deducted from wallet upon entering table
-      const { paid } = deductTableBuyIn(targetBuyIn);
-      const effectiveStack = paid;
+      // Check if player is ALREADY seated in this room with an active table stack > 0
+      const currentProfile = loadUserProfile();
+      const existingSaved = loadPersistedRoomState(normalized);
+      const existingSeat = existingSaved?.players
+        ? existingSaved.players.find((p) => p.id === currentProfile.playerId)
+        : null;
+      const alreadyHasStack = Boolean(existingSeat && existingSeat.stack > 0 && existingSeat.status !== 'out');
+
+      let effectiveStack = targetBuyIn;
+      if (!alreadyHasStack) {
+        // Deduct buy-in only when entering a fresh table / new game
+        const { paid } = deductTableBuyIn(targetBuyIn);
+        effectiveStack = paid;
+      } else if (existingSeat) {
+        effectiveStack = existingSeat.stack;
+      }
 
       const roomState = getOrInitRoomState(
         normalized,
@@ -177,27 +191,8 @@ export function App() {
   );
 
   const handleLeaveTableToLobby = useCallback(
-    (finalStack?: number) => {
+    (finalStack?: number, shouldCashOut = false) => {
       pendingUrlRoomRef.current = null;
-      if (typeof finalStack === 'number' && finalStack > 0) {
-        returnTableStack(finalStack);
-      }
-      // Clean up table state upon cashing out so chips do not remain duplicate on the table
-      if (roomCode === 'BOTS' || tableState.roomMode === 'bots') {
-        deletePersistedRoomState(roomCode);
-      } else {
-        const profile = loadUserProfile();
-        const updatedPlayers = tableState.players.map((p) =>
-          p.id === profile.playerId
-            ? { ...p, stack: 0, status: 'out' as const }
-            : p
-        );
-        savePersistedRoomState(roomCode, {
-          ...tableState,
-          players: updatedPlayers,
-          stateVersion: (tableState.stateVersion ?? 1) + 1,
-        });
-      }
       if (typeof window !== 'undefined' && window.history?.replaceState) {
         try {
           window.history.replaceState({}, '', window.location.pathname);
@@ -205,6 +200,38 @@ export function App() {
           // ignore history API errors
         }
       }
+
+      const isBotGame = roomCode === 'BOTS' || tableState.roomMode === 'bots';
+      const actualCashOut = shouldCashOut || isBotGame;
+
+      if (actualCashOut) {
+        // Explicit cash out: return table stack to player's wallet
+        if (typeof finalStack === 'number' && finalStack > 0) {
+          returnTableStack(finalStack);
+        }
+        if (isBotGame) {
+          deletePersistedRoomState(roomCode);
+        } else {
+          const profile = loadUserProfile();
+          const updatedPlayers = tableState.players.map((p) =>
+            p.id === profile.playerId
+              ? { ...p, stack: 0, status: 'out' as const }
+              : p
+          );
+          const nextState: PokerTableState = {
+            ...tableState,
+            players: updatedPlayers,
+            stateVersion: (tableState.stateVersion ?? 1) + 1,
+          };
+          savePersistedRoomState(roomCode, nextState);
+          syncRef.current?.broadcastState(nextState);
+        }
+      } else {
+        // KEEP SEAT AND TABLE STACK INTACT (Especially for turn-based games)!
+        // Simply persist current table state with player seated so they can return anytime
+        savePersistedRoomState(roomCode, tableState);
+      }
+
       setView('lobby');
     },
     [roomCode, tableState]

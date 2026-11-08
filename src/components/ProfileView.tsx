@@ -12,7 +12,10 @@ import {
   claimBankruptcyBonus,
   computePlaystyleMetrics,
   DEFAULT_USER_PROFILE,
+  generateAccountSyncToken,
+  linkAccountById,
   type PlaystyleArchetype,
+  restoreAccountFromSyncToken,
   type UserProfilePreferences,
   updateUserProfile,
   upsertKnownPlayer,
@@ -58,6 +61,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     null | 'editProfile' | 'friends' | 'emotes' | 'cardBacks' | 'rank' | 'settings'
   >(null);
   const [copiedFriendLink, setCopiedFriendLink] = useState(false);
+  const [copiedPlayerId, setCopiedPlayerId] = useState(false);
+  const [copiedSyncLink, setCopiedSyncLink] = useState(false);
+  const [linkInput, setLinkInput] = useState('');
+  const [linkStatusMsg, setLinkStatusMsg] = useState<string | null>(null);
 
   const metrics = computePlaystyleMetrics(profile.stats);
   const hasPlayedHands = metrics.archetype !== null;
@@ -191,21 +198,64 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const handleShareOrCopyRoomLink = async () => {
     const code = activeRoomCode || 'MESA1';
     const url = `${window.location.origin}/?room=${encodeURIComponent(code)}`;
+    const shareMessage = `🃏 ¡Únete a mi mesa de Poker (#${code}) en Juegos de Cartas!\n\n📱 Si tienes la app 'Cartas' en tu iPhone:\n1. Abre la app 'Cartas'\n2. Escribe el código #${code} en Inicio\n\n🌐 O entra desde tu navegador:\n${url}`;
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: `Juegos de Cartas · Sala #${code}`,
-          text: `Únete a mi sala #${code} en Juegos de Cartas:`,
-          url,
+          title: `Mesa #${code} · Juegos de Cartas`,
+          text: shareMessage,
         });
         return;
       } catch {
         // Fallback to clipboard copy
       }
     }
-    navigator.clipboard?.writeText(url);
+    navigator.clipboard?.writeText(shareMessage);
     setCopiedFriendLink(true);
-    setTimeout(() => setCopiedFriendLink(false), 1800);
+    setTimeout(() => setCopiedFriendLink(false), 2000);
+  };
+
+  const handleCopyPlayerId = () => {
+    navigator.clipboard?.writeText(profile.playerId);
+    setCopiedPlayerId(true);
+    setTimeout(() => setCopiedPlayerId(false), 2000);
+  };
+
+  const handleCopySyncLink = () => {
+    const token = generateAccountSyncToken(profile);
+    const syncUrl = `${window.location.origin}/?sync=${encodeURIComponent(token)}`;
+    navigator.clipboard?.writeText(syncUrl);
+    setCopiedSyncLink(true);
+    setTimeout(() => setCopiedSyncLink(false), 2500);
+  };
+
+  const handleLinkAccount = (e: React.FormEvent) => {
+    e.preventDefault();
+    const raw = linkInput.trim();
+    if (!raw) return;
+    try {
+      let token = raw;
+      if (raw.includes('sync=')) {
+        const parsed = new URL(raw, window.location.origin);
+        token = parsed.searchParams.get('sync') || raw;
+      }
+      const restored = restoreAccountFromSyncToken(token);
+      if (restored) {
+        onProfileChange(restored);
+        setLinkStatusMsg('¡Cuenta vinculada con éxito!');
+        setLinkInput('');
+        setTimeout(() => setLinkStatusMsg(null), 3000);
+        return;
+      }
+      const linked = linkAccountById(raw);
+      onProfileChange(linked);
+      setLinkStatusMsg(`¡Perfil actualizado con ID: ${linked.playerId}!`);
+      setLinkInput('');
+      setTimeout(() => setLinkStatusMsg(null), 3000);
+    } catch {
+      setLinkStatusMsg('No se pudo vincular la cuenta. Revisa el código.');
+      setTimeout(() => setLinkStatusMsg(null), 3000);
+    }
   };
 
   const handleSelectCardBack = (colorId: CardBackColorId) => {
@@ -423,6 +473,77 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </button>
         </div>
       )}
+
+      {/* Sincronización de Cuenta (Safari vs PWA) */}
+      <div className="mt-2.5 rounded-[18px] bg-[#141519] border border-[#22242a] p-3 flex flex-col gap-2.5 text-left">
+        <div className="flex items-center justify-between">
+          <div className="flex flex-col">
+            <span className="text-[12px] font-semibold text-white">
+              Identidad de Cuenta
+            </span>
+            <span className="text-[11px] text-[#7c7d85] font-mono mt-0.5">
+              ID: {profile.playerId}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopyPlayerId}
+            className="h-7 px-2.5 rounded-full bg-[#23252a] text-white text-[11px] font-medium flex items-center gap-1 active:scale-95 transition-transform cursor-pointer"
+          >
+            {copiedPlayerId ? (
+              <>
+                <Check className="w-3 h-3 text-emerald-400" />
+                <span className="text-emerald-400">¡Copiado!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3 h-3" />
+                <span>Copiar ID</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleCopySyncLink}
+          className="w-full h-8 rounded-full bg-[#20222a] hover:bg-[#282a35] text-white text-[11.5px] font-medium flex items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+        >
+          {copiedSyncLink ? (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-emerald-400 font-semibold">¡Enlace copiado! Ábrelo en Safari o PWA</span>
+            </>
+          ) : (
+            <>
+              <Share2 className="w-3.5 h-3.5 text-[#fb923c]" />
+              <span>Copiar enlace para sincronizar con Safari / PWA</span>
+            </>
+          )}
+        </button>
+
+        <form onSubmit={handleLinkAccount} className="flex items-center gap-1.5 pt-0.5">
+          <input
+            type="text"
+            value={linkInput}
+            onChange={(e) => setLinkInput(e.target.value)}
+            placeholder="Vincular con ID o enlace ?sync=..."
+            className="flex-1 h-8 rounded-full bg-black border border-[#25272e] px-3 text-[11px] text-white placeholder:text-[#6b6d76] focus:outline-none focus:border-white"
+          />
+          <button
+            type="submit"
+            className="h-8 px-3 rounded-full bg-white text-black text-[11px] font-semibold active:scale-95 transition-transform cursor-pointer shrink-0"
+          >
+            Vincular
+          </button>
+        </form>
+
+        {linkStatusMsg && (
+          <span className="text-[10.5px] text-emerald-400 font-medium px-1">
+            {linkStatusMsg}
+          </span>
+        )}
+      </div>
 
       {/* Statistics Section + Playstyle Diamond Radar Chart */}
       <div className="mt-3">

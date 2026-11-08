@@ -1,10 +1,22 @@
-import { Bell, Clock, Home, Plus, Trash2, User, X, Zap } from 'lucide-react';
+import {
+  ArrowRight,
+  Bell,
+  Clock,
+  Home,
+  Plus,
+  Smartphone,
+  Trash2,
+  User,
+  X,
+  Zap,
+} from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   createNewOpenRoom,
   deleteOpenRoom,
   getNotificationPermission,
   loadOpenRooms,
+  loadPersistedRoomState,
   type OpenRoomInfo,
   type RoomPacingMode,
   type RoomPlayersMode,
@@ -13,8 +25,10 @@ import {
 } from '../lib/multiplayer';
 import {
   claimBankruptcyBonus,
+  linkAccountById,
   loadKnownPlayers,
   loadUserProfile,
+  restoreAccountFromSyncToken,
   updateUserProfile,
   type UserProfilePreferences,
 } from '../lib/profile';
@@ -60,11 +74,64 @@ export const Lobby: React.FC<LobbyProps> = ({
     NotificationPermission | 'unsupported'
   >(() => getNotificationPermission());
 
-  // Welcome First-Time Name & Avatar Modal state
+  const [quickCodeInput, setQuickCodeInput] = useState('');
+  const [copiedSafariCode, setCopiedSafariCode] = useState(false);
+  const [safariBannerDismissed, setSafariBannerDismissed] = useState(false);
+
+  // Welcome First-Time Name & Avatar & Linking state
   const [welcomeName, setWelcomeName] = useState(() =>
     profile.hasSetCustomName ? profile.name : ''
   );
   const [welcomeAvatar, setWelcomeAvatar] = useState(() => profile.avatarId);
+  const [welcomeIsLinking, setWelcomeIsLinking] = useState(false);
+  const [welcomeLinkInput, setWelcomeLinkInput] = useState('');
+  const [welcomeLinkError, setWelcomeLinkError] = useState<string | null>(null);
+
+  const isStandalone = useMemo(() => {
+    if (typeof window === 'undefined') return true;
+    return Boolean(
+      ('standalone' in window.navigator && Boolean((window.navigator as any).standalone)) ||
+      window.matchMedia('(display-mode: standalone)').matches
+    );
+  }, []);
+
+  const knownPlayersList = useMemo(() => {
+    return loadKnownPlayers().filter((p) => p.id && !p.id.startsWith('bot-'));
+  }, []);
+
+  // Compute active seated games for current player
+  const activeGames = useMemo(() => {
+    const list: Array<{
+      room: OpenRoomInfo;
+      tableStack: number;
+      isMyTurn: boolean;
+      currentTurnName: string;
+      handNumber: number;
+    }> = [];
+
+    for (const r of openRooms) {
+      const saved = loadPersistedRoomState(r.code);
+      if (!saved || !Array.isArray(saved.players)) continue;
+      const heroSeat = saved.players.find(
+        (p) => (p.id === profile.playerId || p.id === 'hero') && p.stack > 0 && p.status !== 'out'
+      );
+      if (heroSeat) {
+        const currentActor = saved.players[saved.currentTurnIndex];
+        const isMyTurn =
+          currentActor?.id === heroSeat.id &&
+          saved.street !== 'showdown';
+        const currentTurnName = currentActor?.name ?? 'En juego';
+        list.push({
+          room: r,
+          tableStack: heroSeat.stack,
+          isMyTurn,
+          currentTurnName,
+          handNumber: saved.handNumber,
+        });
+      }
+    }
+    return list;
+  }, [openRooms, profile.playerId]);
 
   useEffect(() => {
     setOpenRooms(loadOpenRooms());
@@ -103,6 +170,38 @@ export const Lobby: React.FC<LobbyProps> = ({
       hasSetCustomName: true,
     }));
     setProfile(next);
+  };
+
+  const handleWelcomeLinkAccount = (inputOverride?: string) => {
+    const raw = (inputOverride ?? welcomeLinkInput).trim();
+    if (!raw) return;
+    try {
+      let token = raw;
+      if (raw.includes('sync=')) {
+        const parsed = new URL(raw, window.location.origin);
+        token = parsed.searchParams.get('sync') || raw;
+      }
+      const restored = restoreAccountFromSyncToken(token);
+      if (restored) {
+        setProfile(restored);
+        setWelcomeIsLinking(false);
+        return;
+      }
+      const linked = linkAccountById(raw);
+      setProfile(linked);
+      setWelcomeIsLinking(false);
+    } catch {
+      setWelcomeLinkError('No se pudo encontrar la cuenta. Verifica el código.');
+      setTimeout(() => setWelcomeLinkError(null), 3000);
+    }
+  };
+
+  const handleQuickCodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = quickCodeInput.trim().toUpperCase();
+    if (!code) return;
+    setQuickCodeInput('');
+    onJoinOrCreateRoom(code, 'live', `Sala #${code}`, 'real');
   };
 
   const handleCreateRoom = () => {
@@ -262,8 +361,50 @@ export const Lobby: React.FC<LobbyProps> = ({
                 </button>
               </div>
 
+              {/* SAFARI PWA HELPER BANNER (Only shown when opened in browser instead of installed PWA) */}
+              {!isStandalone && !safariBannerDismissed && (
+                <div className="mx-5 mb-2 px-3.5 py-2.5 rounded-[18px] bg-[#161820] border border-[#2b2e3b] flex items-center justify-between gap-2.5 text-left shrink-0 shadow-lg">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center shrink-0">
+                      <Smartphone className="w-4 h-4 text-[#fb923c]" />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[12px] font-semibold text-white truncate">
+                        ¿Tienes 'Cartas' en tu pantalla de inicio?
+                      </span>
+                      <span className="text-[10.5px] text-[#9ca3af] leading-tight">
+                        Abre 'Cartas' para jugar con tu cuenta guardada y fichas
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {primaryOpenRoom && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(primaryOpenRoom.code);
+                          setCopiedSafariCode(true);
+                          setTimeout(() => setCopiedSafariCode(false), 2000);
+                        }}
+                        className="h-7 px-2.5 rounded-full bg-white text-black text-[10.5px] font-bold active:scale-95 transition-transform cursor-pointer"
+                      >
+                        {copiedSafariCode ? '¡Copiado!' : `#${primaryOpenRoom.code}`}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSafariBannerDismissed(true)}
+                      aria-label="Cerrar aviso"
+                      className="w-6 h-6 rounded-full bg-[#242733] text-[#7c7d85] hover:text-white flex items-center justify-center cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* HERO COUNTER: Giant Ultra-Light Bankroll Balance (Saldo Total) */}
-              <div className="my-3.5 px-5 flex flex-col items-start text-left shrink-0">
+              <div className="my-3 px-5 flex flex-col items-start text-left shrink-0">
                 <span className="text-[12px] font-medium text-[#9ca3af] tracking-wide uppercase">
                   Saldo Total
                 </span>
@@ -276,6 +417,117 @@ export const Lobby: React.FC<LobbyProps> = ({
                   </span>
                 </div>
               </div>
+
+              {/* ACTIVE GAMES (Partidas en curso / Por turnos) */}
+              {activeGames.length > 0 && (
+                <div className="mx-5 mb-3.5 flex flex-col gap-2 shrink-0">
+                  <div className="flex items-center justify-between px-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[13px] font-semibold text-white tracking-tight">
+                        Tus Partidas en Curso
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                        {activeGames.length}
+                      </span>
+                    </div>
+                    <span className="text-[10.5px] text-[#9ca3af]">
+                      Mano activa · Sal o vuelve cuando quieras
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    {activeGames.map((game) => (
+                      <div
+                        key={game.room.code}
+                        className="w-full bg-[#13151b] border border-[#262936] rounded-[20px] p-3 flex items-center justify-between gap-3 text-left shadow-lg"
+                      >
+                        <div className="flex flex-col min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[13.5px] font-semibold text-white truncate">
+                              {game.room.name}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white font-mono font-medium">
+                              #{game.room.code}
+                            </span>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                                game.room.pacingMode === 'async'
+                                  ? 'bg-[#eab308]/15 text-[#eab308]'
+                                  : 'bg-emerald-500/15 text-emerald-400'
+                              }`}
+                            >
+                              {game.room.pacingMode === 'async'
+                                ? '⏳ Turnos'
+                                : '⚡ En Vivo'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2 mt-1">
+                            {game.isMyTurn ? (
+                              <span className="flex items-center gap-1.5 text-[11.5px] font-bold text-[#fb923c]">
+                                <span className="w-2 h-2 rounded-full bg-[#f97316] animate-pulse" />
+                                <span>¡Es tu turno!</span>
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-[#9ca3af]">
+                                Turno:{' '}
+                                <strong className="text-white font-medium">
+                                  {game.currentTurnName}
+                                </strong>
+                              </span>
+                            )}
+                            <span className="text-[11px] text-[#7c7d85]">
+                              · Mesa:{' '}
+                              <strong className="text-[#eab308] font-semibold">
+                                {game.tableStack} fichas
+                              </strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onJoinOrCreateRoom(
+                              game.room.code,
+                              game.room.pacingMode,
+                              game.room.name,
+                              game.room.roomMode,
+                              game.room.buyIn
+                            )
+                          }
+                          className="h-8 px-3.5 rounded-full bg-white text-black text-[12px] font-bold flex items-center gap-1 shrink-0 active:scale-95 transition-transform cursor-pointer shadow-md"
+                        >
+                          <span>Reanudar</span>
+                          <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* QUICK JOIN BY CODE IN LOBBY HOME */}
+              <form
+                onSubmit={handleQuickCodeSubmit}
+                className="mx-5 mb-3 flex items-center gap-2 bg-[#121316] border border-[#23252a] rounded-full p-1 pl-3.5 shrink-0"
+              >
+                <span className="text-[12px] text-[#7c7d85] font-mono shrink-0">#</span>
+                <input
+                  type="text"
+                  value={quickCodeInput}
+                  onChange={(e) => setQuickCodeInput(e.target.value.toUpperCase())}
+                  placeholder="Escribe un código de sala (ej. MESA1)..."
+                  maxLength={8}
+                  className="flex-1 bg-transparent text-white text-[12px] placeholder:text-[#5e6068] focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  className="h-7 px-3.5 rounded-full bg-white text-black text-[11px] font-bold active:scale-95 transition-transform cursor-pointer shrink-0"
+                >
+                  Entrar
+                </button>
+              </form>
 
               {/* BANKRUPTCY RECOVERY BONUS BANNER (When bankroll is 0) */}
               {profile.bankroll <= 0 && (
@@ -638,70 +890,166 @@ export const Lobby: React.FC<LobbyProps> = ({
         </nav>
 
         {/* FIRST-TIME WELCOME MODAL: "¿Cómo te llamas?" + Avatar Picker */}
+        {/* FIRST-TIME WELCOME MODAL: "¿Cómo te llamas?" OR "¿Ya tienes una cuenta?" */}
         {!profile.hasSetCustomName && (
           <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-5">
-            <form
-              onSubmit={handleCompleteWelcome}
-              className="w-full max-w-[380px] bg-[#16171b] border border-[#282a33] rounded-[28px] p-6 flex flex-col gap-5 shadow-2xl"
-            >
-              <div className="flex flex-col items-center text-center gap-1">
-                <div className="w-16 h-16 rounded-full bg-[#1e2028] border border-[#2e313d] flex items-center justify-center mb-1">
-                  <Avatar3D avatarId={welcomeAvatar} size={56} />
+            {welcomeIsLinking ? (
+              <div className="w-full max-w-[380px] bg-[#16171b] border border-[#282a33] rounded-[28px] p-6 flex flex-col gap-4 shadow-2xl text-left">
+                <div className="flex flex-col items-center text-center gap-1">
+                  <div className="w-14 h-14 rounded-full bg-white/10 flex items-center justify-center text-[26px] mb-1">
+                    🔗
+                  </div>
+                  <h2 className="text-[19px] font-semibold text-white tracking-tight">
+                    Vincular tu cuenta existente
+                  </h2>
+                  <p className="text-[12px] text-[#8e9099]">
+                    Si ya creaste tu cuenta en la app de inicio o en otro navegador, vincúlala aquí
+                  </p>
                 </div>
-                <h2 className="text-[20px] font-semibold text-white tracking-tight">
-                  ¿Cómo te llamas?
-                </h2>
-                <p className="text-[12.5px] text-[#8e9099]">
-                  Elige tu nombre y avatar para sentarte en las mesas con tus amigos
-                </p>
+
+                {knownPlayersList.length > 0 && (
+                  <div className="flex flex-col gap-1.5 bg-black/40 border border-[#23252a] rounded-[18px] p-3">
+                    <span className="text-[11px] font-medium text-[#9ca3af]">
+                      Cuentas guardadas en este dispositivo:
+                    </span>
+                    <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto">
+                      {knownPlayersList.map((kp) => (
+                        <button
+                          key={kp.id}
+                          type="button"
+                          onClick={() => handleWelcomeLinkAccount(kp.id)}
+                          className="flex items-center justify-between p-2 rounded-[12px] bg-[#1c1e26] hover:bg-[#252834] active:scale-98 transition-all cursor-pointer text-left"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Avatar3D avatarId={kp.avatarId} size={28} />
+                            <span className="text-[12.5px] font-medium text-white">
+                              {kp.name}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-[#eab308] font-semibold">
+                            Usar esta →
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleWelcomeLinkAccount();
+                  }}
+                  className="flex flex-col gap-2.5"
+                >
+                  <label className="text-[11.5px] text-[#9ca3af] font-medium">
+                    O escribe tu ID o pega el enlace de sincronización:
+                  </label>
+                  <input
+                    type="text"
+                    value={welcomeLinkInput}
+                    onChange={(e) => setWelcomeLinkInput(e.target.value)}
+                    placeholder="ID (ej. p_abc123) o enlace ?sync=..."
+                    autoFocus
+                    className="h-11 px-3.5 rounded-[14px] bg-black border border-[#2e313b] text-white text-[13px] placeholder:text-[#6b6d76] focus:outline-none focus:border-white"
+                  />
+
+                  {welcomeLinkError && (
+                    <span className="text-[11px] text-red-400 font-medium">
+                      {welcomeLinkError}
+                    </span>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="w-full h-10 rounded-full bg-white text-black text-[13px] font-bold cursor-pointer active:scale-95 transition-transform mt-1"
+                  >
+                    Vincular y Continuar
+                  </button>
+                </form>
+
+                <button
+                  type="button"
+                  onClick={() => setWelcomeIsLinking(false)}
+                  className="text-[12px] text-[#7c7d85] hover:text-white text-center cursor-pointer mt-1"
+                >
+                  ← Volver a crear nuevo perfil
+                </button>
               </div>
-
-              <input
-                type="text"
-                value={welcomeName}
-                onChange={(e) => setWelcomeName(e.target.value)}
-                placeholder="Tu nombre (ej. Isaac, Leo, Carlos...)"
-                maxLength={18}
-                autoFocus
-                required
-                className="h-12 px-4 rounded-[16px] bg-black border border-[#2e313b] text-white text-[15px] placeholder:text-[#6b6d76] focus:outline-none focus:border-white text-center font-medium"
-              />
-
-              <div className="flex flex-col gap-2">
-                <span className="text-[11.5px] text-[#9ca3af] font-medium text-center">
-                  Elige tu Avatar 3D
-                </span>
-                <div className="grid grid-cols-3 gap-2">
-                  {AVATAR_OPTIONS.map((av) => {
-                    const isSelected = welcomeAvatar === av.id;
-                    return (
-                      <button
-                        key={av.id}
-                        type="button"
-                        onClick={() => setWelcomeAvatar(av.id)}
-                        className={`p-2 rounded-[16px] border flex flex-col items-center gap-1 cursor-pointer transition-all ${
-                          isSelected
-                            ? 'bg-white/15 border-white'
-                            : 'bg-black/40 border-[#25272e] hover:border-white/30'
-                        }`}
-                      >
-                        <Avatar3D avatarId={av.id} size={42} />
-                        <span className="text-[11px] font-medium text-white">
-                          {av.label}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full h-11 rounded-full bg-white text-black text-[14px] font-semibold cursor-pointer active:scale-95 transition-transform"
+            ) : (
+              <form
+                onSubmit={handleCompleteWelcome}
+                className="w-full max-w-[380px] bg-[#16171b] border border-[#282a33] rounded-[28px] p-6 flex flex-col gap-4 shadow-2xl"
               >
-                Continuar
-              </button>
-            </form>
+                <div className="flex flex-col items-center text-center gap-1">
+                  <div className="w-16 h-16 rounded-full bg-[#1e2028] border border-[#2e313d] flex items-center justify-center mb-1">
+                    <Avatar3D avatarId={welcomeAvatar} size={56} />
+                  </div>
+                  <h2 className="text-[20px] font-semibold text-white tracking-tight">
+                    ¿Cómo te llamas?
+                  </h2>
+                  <p className="text-[12.5px] text-[#8e9099]">
+                    Elige tu nombre y avatar para sentarte en las mesas con tus amigos
+                  </p>
+                </div>
+
+                <input
+                  type="text"
+                  value={welcomeName}
+                  onChange={(e) => setWelcomeName(e.target.value)}
+                  placeholder="Tu nombre (ej. Isaac, Leo, Carlos...)"
+                  maxLength={18}
+                  autoFocus
+                  required
+                  className="h-12 px-4 rounded-[16px] bg-black border border-[#2e313b] text-white text-[15px] placeholder:text-[#6b6d76] focus:outline-none focus:border-white text-center font-medium"
+                />
+
+                <div className="flex flex-col gap-2">
+                  <span className="text-[11.5px] text-[#9ca3af] font-medium text-center">
+                    Elige tu Avatar 3D
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {AVATAR_OPTIONS.map((av) => {
+                      const isSelected = welcomeAvatar === av.id;
+                      return (
+                        <button
+                          key={av.id}
+                          type="button"
+                          onClick={() => setWelcomeAvatar(av.id)}
+                          className={`p-2 rounded-[16px] border flex flex-col items-center gap-1 cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-white/15 border-white'
+                              : 'bg-black/40 border-[#25272e] hover:border-white/30'
+                          }`}
+                        >
+                          <Avatar3D avatarId={av.id} size={42} />
+                          <span className="text-[11px] font-medium text-white">
+                            {av.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full h-11 rounded-full bg-white text-black text-[14px] font-semibold cursor-pointer active:scale-95 transition-transform"
+                >
+                  Continuar
+                </button>
+
+                <div className="pt-2 border-t border-[#23252a] flex flex-col items-center">
+                  <button
+                    type="button"
+                    onClick={() => setWelcomeIsLinking(true)}
+                    className="text-[12px] text-[#fb923c] hover:underline font-medium cursor-pointer"
+                  >
+                    ¿Ya creaste tu cuenta antes? Vincular con ID
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         )}
 

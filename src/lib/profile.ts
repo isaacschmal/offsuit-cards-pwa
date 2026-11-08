@@ -111,11 +111,92 @@ export const DEFAULT_USER_PROFILE: UserProfilePreferences = {
 
 let memoryUserProfile: UserProfilePreferences | null = null;
 
+export function generateAccountSyncToken(profile: UserProfilePreferences): string {
+  try {
+    const payload = {
+      id: profile.playerId,
+      name: profile.name,
+      hasSetCustomName: profile.hasSetCustomName,
+      avatarId: profile.avatarId,
+      cardBackColor: profile.cardBackColor,
+      xp: profile.xp,
+      level: profile.level,
+      bankroll: profile.bankroll,
+      selectedEmote: profile.selectedEmote,
+      unlockedEmotes: profile.unlockedEmotes,
+      stats: profile.stats,
+    };
+    return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  } catch {
+    return '';
+  }
+}
+
+export function restoreAccountFromSyncToken(token: string): UserProfilePreferences | null {
+  try {
+    const raw = decodeURIComponent(escape(atob(token.trim())));
+    const data = JSON.parse(raw);
+    if (!data.id || typeof data.name !== 'string') return null;
+    const restored: UserProfilePreferences = {
+      ...DEFAULT_USER_PROFILE,
+      ...data,
+      playerId: data.id,
+      hasSetCustomName: true,
+      bankroll: typeof data.bankroll === 'number' ? data.bankroll : 1000,
+      stats: {
+        ...DEFAULT_USER_PROFILE.stats,
+        ...(data.stats ?? {}),
+      },
+    };
+    saveUserProfile(restored);
+    return restored;
+  } catch {
+    return null;
+  }
+}
+
+export function linkAccountById(targetId: string, customName?: string): UserProfilePreferences {
+  const cleanId = targetId.trim();
+  const known = loadKnownPlayers().find(
+    (p) => p.id === cleanId || p.name.toLowerCase() === cleanId.toLowerCase()
+  );
+  const existing = loadUserProfile();
+  const next: UserProfilePreferences = {
+    ...existing,
+    playerId: known ? known.id : cleanId,
+    name: customName?.trim() || known?.name || existing.name,
+    avatarId: known?.avatarId || existing.avatarId,
+    xp: typeof known?.xp === 'number' ? known.xp : existing.xp,
+    hasSetCustomName: true,
+  };
+  return saveUserProfile(next);
+}
+
 export function loadUserProfile(): UserProfilePreferences {
   if (typeof window === 'undefined' || !window.localStorage) {
     return memoryUserProfile ?? DEFAULT_USER_PROFILE;
   }
   try {
+    // Check if ?sync=... is in the URL to automatically import account across Safari / PWA
+    if (typeof window !== 'undefined' && window.location?.search) {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const syncToken = params.get('sync');
+        if (syncToken) {
+          const restored = restoreAccountFromSyncToken(syncToken);
+          if (restored) {
+            params.delete('sync');
+            const newQuery = params.toString();
+            const cleanUrl = `${window.location.pathname}${newQuery ? '?' + newQuery : ''}`;
+            window.history.replaceState({}, '', cleanUrl);
+            return restored;
+          }
+        }
+      } catch {
+        // ignore url parsing error
+      }
+    }
+
     let raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
     let isMigrating = false;
 

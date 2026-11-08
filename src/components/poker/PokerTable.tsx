@@ -33,7 +33,7 @@ import { TopOpponentsRow } from './TopOpponentsRow';
 
 interface PokerTableProps {
   initialState: PokerTableState;
-  onBack: (finalStack?: number) => void;
+  onBack: (finalStack?: number, shouldCashOut?: boolean) => void;
   onBroadcastState?: (newState: PokerTableState) => void;
   externalState?: PokerTableState | null;
   roomName?: string;
@@ -187,11 +187,16 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
   const handleShareRoomLink = async () => {
     const shareUrl = `${window.location.origin}/?room=${encodeURIComponent(tableState.roomId)}`;
+    const shareText =
+      `🃏 Únete a mi mesa de póker #${tableState.roomId}:\n\n` +
+      `1️⃣ Si tienes la app instalada en tu pantalla de inicio: Abre 'Cartas' y entra a la sala #${tableState.roomId}\n` +
+      `2️⃣ O entra directo desde el navegador:\n${shareUrl}`;
+
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: `Sala #${tableState.roomId} · Juegos de Cartas`,
-          text: `Únete a mi mesa de póker (${roomName}) con el código #${tableState.roomId}:`,
+          title: `Mesa #${tableState.roomId} · Cartas`,
+          text: shareText,
           url: shareUrl,
         });
         return;
@@ -199,7 +204,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
         // Fallback to clipboard
       }
     }
-    navigator.clipboard?.writeText(shareUrl);
+    navigator.clipboard?.writeText(shareText);
     setCopiedRoomInvite(true);
     setTimeout(() => setCopiedRoomInvite(false), 2000);
   };
@@ -221,9 +226,23 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     return allBotsEliminated || (reachedMaxHands && tableState.street === 'showdown');
   }, [tableState.roomMode, allBotsEliminated, reachedMaxHands, tableState.street]);
 
-  // Safe Back Button handler with Stack / Money Protection
+  // Safe Back Button handler: Never blocks async / turn-based players from returning to menu!
   const handleBackButtonClick = () => {
     triggerHaptic('light');
+
+    // In turn-based / async mode: players can freely return to the menu anytime
+    // without folding or cashing out! Game continues and seat & stack are preserved.
+    if (pacingMode === 'async') {
+      onBack(hero.stack, false);
+      return;
+    }
+
+    // In solo bot mode: leaving cashes out remaining table stack to wallet
+    if (tableState.roomMode === 'bots') {
+      onBack(hero.stack, true);
+      return;
+    }
+
     const hasActiveChipsInPot =
       seatedCount >= 2 &&
       tableState.street !== 'showdown' &&
@@ -235,8 +254,8 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       return;
     }
 
-    // 0 chips bet in current hand, showdown, or waiting for players -> return exact table stack to wallet
-    onBack(hero.stack);
+    // Live mode with 0 chips currently bet: return to menu keeping seat by default
+    onBack(hero.stack, false);
   };
 
   const handleConfirmFoldAndLeave = () => {
@@ -252,7 +271,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     savePersistedRoomState(foldedState.roomId, foldedState);
     onBroadcastState?.(foldedState);
     setIsLeaveConfirmOpen(false);
-    onBack(updatedHero.stack);
+    onBack(updatedHero.stack, true); // true = cash out & leave seat permanently
   };
 
   const handleHeroAction = (action: PlayerActionInput) => {
@@ -808,14 +827,24 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                   onClick={() => setIsLeaveConfirmOpen(false)}
                   className="w-full h-11 rounded-full bg-white text-black text-[14px] font-semibold active:scale-95 transition-transform cursor-pointer"
                 >
-                  Seguir jugando
+                  Seguir en la mesa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsLeaveConfirmOpen(false);
+                    onBack(hero.stack, false);
+                  }}
+                  className="w-full h-11 rounded-full bg-[#1e2028] border border-[#2e313d] text-white text-[13.5px] font-medium active:scale-95 transition-transform cursor-pointer"
+                >
+                  Ir al menú (mantener asiento y fichas)
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmFoldAndLeave}
                   className="w-full h-11 rounded-full bg-[#23252a] text-[#ef4444] text-[13.5px] font-semibold active:scale-95 transition-transform cursor-pointer"
                 >
-                  Hacer Fold y salir ({hero.stack} fichas)
+                  Abandonar y retirar fichas (Fold)
                 </button>
               </div>
             </div>
