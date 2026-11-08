@@ -17,6 +17,7 @@ export interface OpenRoomInfo {
   name: string;
   pacingMode: RoomPacingMode;
   roomMode: RoomPlayersMode;
+  buyIn: number; // e.g. 100, 200, 300, 500
   playerCount: number;
   maxPlayers: number;
   blindsLabel: string;
@@ -517,7 +518,8 @@ export function createNewOpenRoom(
   name: string,
   pacingMode: RoomPacingMode,
   customCode?: string,
-  roomMode: RoomPlayersMode = 'real'
+  roomMode: RoomPlayersMode = 'real',
+  buyIn = 200
 ): OpenRoomInfo {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let generated = '';
@@ -526,15 +528,20 @@ export function createNewOpenRoom(
   }
   const code = (customCode?.trim() || generated).toUpperCase();
   const profile = loadUserProfile();
+  const resolvedBuyIn =
+    roomMode === 'bots' ? Math.min(100, Math.max(20, buyIn)) : Math.max(50, buyIn);
+  const sb = Math.max(1, Math.round(resolvedBuyIn / 100));
+  const bb = Math.max(2, Math.round(resolvedBuyIn / 50));
 
   const newRoom: OpenRoomInfo = {
     code,
     name: name.trim() || `Sala #${code}`,
     pacingMode,
     roomMode,
+    buyIn: resolvedBuyIn,
     playerCount: roomMode === 'bots' ? 6 : 1,
     maxPlayers: 6,
-    blindsLabel: '1/2',
+    blindsLabel: `${sb}/${bb}`,
     turnTimerSeconds: pacingMode === 'live' ? 20 : null,
     currentTurnPlayerName: profile.name || 'Jugador',
     updatedAt: Date.now(),
@@ -563,7 +570,7 @@ export function savePersistedRoomState(roomCode: string, state: PokerTableState)
     const key = `${ROOM_STATE_PREFIX}${normalized}`;
     window.localStorage.setItem(key, JSON.stringify(state));
 
-    // Also update the room's currentTurnPlayerName and real playerCount in the directory
+    // Also update the room's currentTurnPlayerName, buyIn, and real playerCount in the directory
     const rooms = loadOpenRooms();
     const found = rooms.find((r) => r.code === normalized);
     if (found) {
@@ -577,6 +584,7 @@ export function savePersistedRoomState(roomCode: string, state: PokerTableState)
           : currentActor?.name ?? 'En juego';
       upsertOpenRoom({
         ...found,
+        buyIn: state.tableBuyIn ?? found.buyIn ?? 200,
         playerCount: state.roomMode === 'bots' ? 6 : Math.max(1, seatedCount),
         currentTurnPlayerName: turnLabel,
       });
@@ -588,11 +596,14 @@ export function savePersistedRoomState(roomCode: string, state: PokerTableState)
 
 export function getOrInitRoomState(
   roomCode: string,
-  roomMode: RoomPlayersMode = 'real'
+  roomMode: RoomPlayersMode = 'real',
+  buyIn?: number
 ): PokerTableState {
   const normalized = roomCode.trim().toUpperCase();
   const profile = loadUserProfile();
   const saved = loadPersistedRoomState(normalized);
+  const targetBuyIn =
+    buyIn ?? saved?.tableBuyIn ?? (roomMode === 'bots' ? 100 : 200);
 
   if (
     saved &&
@@ -604,18 +615,18 @@ export function getOrInitRoomState(
       id: profile.playerId,
       name: profile.name || 'Jugador',
       avatarId: profile.avatarId,
-      stack: profile.bankroll,
+      stack: targetBuyIn,
     });
     savePersistedRoomState(normalized, withLocalPlayer);
     return withLocalPlayer;
   }
 
-  const fresh = createInitialTableState(normalized, roomMode, false);
+  const fresh = createInitialTableState(normalized, roomMode, false, targetBuyIn);
   const { state: seatedFresh } = seatPlayerInTable(fresh, {
     id: profile.playerId,
     name: profile.name || 'Jugador',
     avatarId: profile.avatarId,
-    stack: profile.bankroll,
+    stack: targetBuyIn,
   });
   savePersistedRoomState(normalized, seatedFresh);
   return seatedFresh;

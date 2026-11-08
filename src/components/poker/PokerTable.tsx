@@ -21,10 +21,10 @@ import {
 } from '../../lib/multiplayer';
 import { triggerHaptic } from '../../lib/haptics';
 import {
+  deductTableBuyIn,
   loadUserProfile,
   recordHandCompletedStats,
   recordPlayerActionStats,
-  savePlayerBankroll,
 } from '../../lib/profile';
 import { AnimatedNumber } from './AnimatedNumber';
 import { Avatar3D } from './Avatar3D';
@@ -33,7 +33,7 @@ import { TopOpponentsRow } from './TopOpponentsRow';
 
 interface PokerTableProps {
   initialState: PokerTableState;
-  onBack: () => void;
+  onBack: (finalStack?: number) => void;
   onBroadcastState?: (newState: PokerTableState) => void;
   externalState?: PokerTableState | null;
   roomName?: string;
@@ -110,13 +110,6 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     setSliderAmount(minRaiseBet);
     setIsSliderOpen(false);
   }, [tableState.handNumber, tableState.street, minRaiseBet]);
-
-  // Persist Hero's stack to bankroll on showdown
-  useEffect(() => {
-    if (tableState.street === 'showdown' && hero) {
-      savePlayerBankroll(hero.stack);
-    }
-  }, [tableState.street, hero]);
 
   // Trigger PWA / Web Notification when turn transitions from an opponent to Hero in async mode
   useEffect(() => {
@@ -202,6 +195,23 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     setTimeout(() => setCopiedRoomInvite(false), 2000);
   };
 
+  // Bot session completion checks
+  const allBotsEliminated = useMemo(() => {
+    if (tableState.roomMode !== 'bots') return false;
+    return opponents.every(
+      (o) => isVacantSeat(o) || o.status === 'out' || o.stack <= 0
+    );
+  }, [tableState.roomMode, opponents]);
+
+  const reachedMaxHands = useMemo(() => {
+    return tableState.roomMode === 'bots' && tableState.handNumber >= 100;
+  }, [tableState.roomMode, tableState.handNumber]);
+
+  const isBotSessionFinished = useMemo(() => {
+    if (tableState.roomMode !== 'bots') return false;
+    return allBotsEliminated || (reachedMaxHands && tableState.street === 'showdown');
+  }, [tableState.roomMode, allBotsEliminated, reachedMaxHands, tableState.street]);
+
   // Safe Back Button handler with Stack / Money Protection
   const handleBackButtonClick = () => {
     triggerHaptic('light');
@@ -216,9 +226,8 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       return;
     }
 
-    // 0 chips bet in current hand, showdown, or waiting for players -> save exact stack and exit immediately
-    savePlayerBankroll(hero.stack);
-    onBack();
+    // 0 chips bet in current hand, showdown, or waiting for players -> return exact table stack to wallet
+    onBack(hero.stack);
   };
 
   const handleConfirmFoldAndLeave = () => {
@@ -230,12 +239,11 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     }
     const updatedHero =
       foldedState.players[resolvedHeroIndex] ?? foldedState.players[0] ?? hero;
-    savePlayerBankroll(updatedHero.stack);
     setTableState(foldedState);
     savePersistedRoomState(foldedState.roomId, foldedState);
     onBroadcastState?.(foldedState);
     setIsLeaveConfirmOpen(false);
-    onBack();
+    onBack(updatedHero.stack);
   };
 
   const handleHeroAction = (action: PlayerActionInput) => {
@@ -246,14 +254,38 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     if (next.street === 'showdown') {
       recordHandCompletedStats(next, hero.id);
     }
-    const nextHero = next.players[resolvedHeroIndex] ?? next.players[0];
-    if (nextHero) {
-      savePlayerBankroll(nextHero.stack);
-    }
     setIsSliderOpen(false);
     setTableState(next);
     savePersistedRoomState(next.roomId, next);
     onBroadcastState?.(next);
+  };
+
+  const handleRebuy = () => {
+    const buyInNeeded =
+      tableState.tableBuyIn ?? (tableState.roomMode === 'bots' ? 100 : 200);
+    const { paid } = deductTableBuyIn(buyInNeeded);
+    if (paid <= 0) return;
+    triggerHaptic('medium');
+    const updatedPlayers = tableState.players.map((p, idx) => {
+      if (idx === resolvedHeroIndex) {
+        return {
+          ...p,
+          stack: p.stack + paid,
+          status: 'active' as const,
+          lastAction: null,
+        };
+      }
+      return p;
+    });
+    const nextState: PokerTableState = {
+      ...tableState,
+      players: updatedPlayers,
+      stateVersion: (tableState.stateVersion ?? 1) + 1,
+    };
+    setTableState(nextState);
+    savePersistedRoomState(nextState.roomId, nextState);
+    onBroadcastState?.(nextState);
+    setProfileState(loadUserProfile());
   };
 
   const handlePresetSelect = (preset: '1bb' | 'half-pot' | 'pot') => {
@@ -380,7 +412,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               </button>
             ) : (
               <span className="text-[11px] px-2.5 py-1 rounded-full font-medium border bg-indigo-500/10 border-indigo-500/30 text-indigo-300">
-                🤖 Práctica vs Bots
+                🤖 Práctica vs Bots · Mano {Math.min(100, tableState.handNumber)}/100
               </span>
             )}
           </div>
@@ -456,25 +488,79 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
           {/* Action Controls Row */}
           {tableState.street === 'showdown' ? (
-            <div className="h-[46px] flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleDealNextHand}
-                className="w-full h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-medium flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
-              >
-                <span>
-                  {tableState.winnerIds.includes(hero.id)
-                    ? `You won ${tableState.collectedPot}`
-                    : `${
-                        tableState.players.find((p) =>
-                          tableState.winnerIds.includes(p.id)
-                        )?.name ?? 'Player'
-                      } won ${tableState.collectedPot}`}
-                  {tableState.winningHandName ? ` · ${tableState.winningHandName}` : ''}
-                </span>
-                <span className="text-[#7c7d85] ml-1">· Next Hand →</span>
-              </button>
-            </div>
+            isBotSessionFinished ? (
+              <div className="h-[46px] flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onBack(hero.stack)}
+                  className="w-full h-[46px] rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
+                >
+                  <span>
+                    {allBotsEliminated
+                      ? '🏆 ¡Todos los bots eliminados!'
+                      : '🏁 Límite de 100 manos alcanzado'}
+                    {' · '}Retirar {hero.stack} fichas al menú →
+                  </span>
+                </button>
+              </div>
+            ) : hero.stack <= 0 ? (
+              <div className="h-[46px] flex items-center gap-2">
+                {profileState.bankroll > 0 ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleRebuy}
+                      className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-amber-500/50 text-amber-300 text-[12.5px] font-medium flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+                    >
+                      <span>
+                        Recomprar entrada (+
+                        {Math.min(
+                          profileState.bankroll,
+                          tableState.tableBuyIn ??
+                            (tableState.roomMode === 'bots' ? 100 : 200)
+                        )}
+                        )
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onBack(0)}
+                      className="h-[46px] px-4 rounded-full bg-[#16171a] border border-[#23252a] text-[#9ca3af] text-[13px] font-medium active:scale-95 cursor-pointer"
+                    >
+                      Salir
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onBack(0)}
+                    className="w-full h-[46px] rounded-full bg-red-500/15 border border-red-500/35 text-red-300 text-[13px] font-medium flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+                  >
+                    <span>Bancarrota (0 fichas) · Salir al menú</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="h-[46px] flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDealNextHand}
+                  className="w-full h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-medium flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
+                >
+                  <span>
+                    {tableState.winnerIds.includes(hero.id)
+                      ? `You won ${tableState.collectedPot}`
+                      : `${
+                          tableState.players.find((p) =>
+                            tableState.winnerIds.includes(p.id)
+                          )?.name ?? 'Player'
+                        } won ${tableState.collectedPot}`}
+                    {tableState.winningHandName ? ` · ${tableState.winningHandName}` : ''}
+                  </span>
+                  <span className="text-[#7c7d85] ml-1">· Next Hand →</span>
+                </button>
+              </div>
+            )
           ) : isSliderOpen ? (
             /* CUSTOM RAISE SLIDER MODE */
             <div className="flex flex-col gap-2">

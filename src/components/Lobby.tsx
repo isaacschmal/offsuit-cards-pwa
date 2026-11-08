@@ -12,6 +12,7 @@ import {
   subscribeToOpenRoomsDirectory,
 } from '../lib/multiplayer';
 import {
+  claimBankruptcyBonus,
   loadKnownPlayers,
   loadUserProfile,
   updateUserProfile,
@@ -29,7 +30,8 @@ interface LobbyProps {
     roomCode: string,
     pacingMode?: RoomPacingMode,
     roomName?: string,
-    roomMode?: RoomPlayersMode
+    roomMode?: RoomPlayersMode,
+    buyIn?: number
   ) => void;
 }
 
@@ -51,6 +53,7 @@ export const Lobby: React.FC<LobbyProps> = ({
     useState<RoomPacingMode>(activePacingMode);
   const [selectedRoomMode, setSelectedRoomMode] =
     useState<RoomPlayersMode>('real');
+  const [selectedBuyIn, setSelectedBuyIn] = useState<number>(200);
   const [newRoomName, setNewRoomName] = useState('');
   const [joinInput, setJoinInput] = useState('');
   const [notifPerm, setNotifPerm] = useState<
@@ -110,11 +113,16 @@ export const Lobby: React.FC<LobbyProps> = ({
         : selectedPacing === 'async'
         ? `Mesa de ${profile.name || 'Amigos'} (Turnos)`
         : `Mesa de ${profile.name || 'Amigos'}`);
+    const resolvedBuyIn =
+      selectedRoomMode === 'bots'
+        ? Math.min(100, Math.max(20, selectedBuyIn))
+        : selectedBuyIn;
     const created = createNewOpenRoom(
       label,
       selectedPacing,
       undefined,
-      selectedRoomMode
+      selectedRoomMode,
+      resolvedBuyIn
     );
     setOpenRooms(loadOpenRooms());
     setNewRoomName('');
@@ -126,7 +134,8 @@ export const Lobby: React.FC<LobbyProps> = ({
       created.code,
       created.pacingMode,
       created.name,
-      created.roomMode
+      created.roomMode,
+      resolvedBuyIn
     );
   };
 
@@ -219,38 +228,45 @@ export const Lobby: React.FC<LobbyProps> = ({
                   )}
                 </div>
 
-                {/* Orange Circular Level Progress Ring with Level Number inside */}
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('profile')}
-                  aria-label={`Nivel ${profile.level}`}
-                  className="relative w-9 h-9 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
-                >
-                  <svg className="w-9 h-9 -rotate-90" viewBox="0 0 38 38">
-                    <circle
-                      cx="19"
-                      cy="19"
-                      r={levelRadius}
-                      fill="none"
-                      stroke="#23252a"
-                      strokeWidth="3.2"
-                    />
-                    <circle
-                      cx="19"
-                      cy="19"
-                      r={levelRadius}
-                      fill="none"
-                      stroke="#f97316"
-                      strokeWidth="3.2"
-                      strokeLinecap="round"
-                      strokeDasharray={levelCircumference}
-                      strokeDashoffset={strokeDashoffset}
-                    />
-                  </svg>
-                  <span className="absolute text-[13px] font-semibold text-[#fb923c] leading-none">
-                    {profile.level}
-                  </span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#16171a] border border-[#23252a] text-[12px] font-medium text-[#eab308]">
+                    <span>🪙</span>
+                    <span>{profile.bankroll.toLocaleString('en-US')}</span>
+                  </div>
+
+                  {/* Orange Circular Level Progress Ring with Level Number inside */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('profile')}
+                    aria-label={`Nivel ${profile.level}`}
+                    className="relative w-9 h-9 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
+                  >
+                    <svg className="w-9 h-9 -rotate-90" viewBox="0 0 38 38">
+                      <circle
+                        cx="19"
+                        cy="19"
+                        r={levelRadius}
+                        fill="none"
+                        stroke="#23252a"
+                        strokeWidth="3.2"
+                      />
+                      <circle
+                        cx="19"
+                        cy="19"
+                        r={levelRadius}
+                        fill="none"
+                        stroke="#f97316"
+                        strokeWidth="3.2"
+                        strokeLinecap="round"
+                        strokeDasharray={levelCircumference}
+                        strokeDashoffset={strokeDashoffset}
+                      />
+                    </svg>
+                    <span className="absolute text-[13px] font-semibold text-[#fb923c] leading-none">
+                      {profile.level}
+                    </span>
+                  </button>
+                </div>
               </div>
 
               {/* HERO COUNTER: Giant Ultra-Light XP Balance (Left-aligned like 516 in image.png) */}
@@ -259,6 +275,30 @@ export const Lobby: React.FC<LobbyProps> = ({
                   {profile.xp}
                 </span>
               </div>
+
+              {/* BANKRUPTCY RECOVERY BONUS BANNER (When bankroll is 0) */}
+              {profile.bankroll <= 0 && (
+                <div className="mx-5 mb-3 p-3 rounded-[20px] bg-red-950/40 border border-red-500/30 flex items-center justify-between gap-3 shrink-0">
+                  <div className="flex flex-col text-left">
+                    <span className="text-[13px] font-semibold text-red-200">
+                      Bancarrota (0 fichas)
+                    </span>
+                    <span className="text-[11px] text-red-300/80 mt-0.5">
+                      Reclama tu bono de recuperación (+200) para volver a las mesas
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = claimBankruptcyBonus();
+                      setProfile(next);
+                    }}
+                    className="h-8 px-3 rounded-full bg-white text-black text-[12px] font-bold shrink-0 active:scale-95 transition-transform cursor-pointer"
+                  >
+                    +200 fichas
+                  </button>
+                </div>
+              )}
 
               {/* HORIZONTAL PASTEL GRADIENT CARDS CAROUSEL (Edge-to-Edge Full Bleed, Never Clipped at 16px) */}
               <div
@@ -427,7 +467,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                         </span>
                       </div>
                       <span className="text-[11px] text-[#7c7d85] mt-0.5">
-                        #{primaryOpenRoom.code} · {primaryOpenRoom.playerCount}/
+                        #{primaryOpenRoom.code} · Entrada: {primaryOpenRoom.buyIn ?? (primaryOpenRoom.roomMode === 'bots' ? 100 : 200)} · {primaryOpenRoom.playerCount}/
                         {primaryOpenRoom.maxPlayers} · Ver salas ({openRooms.length})
                       </span>
                     </button>
@@ -456,7 +496,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                             primaryOpenRoom.code,
                             primaryOpenRoom.pacingMode,
                             primaryOpenRoom.name,
-                            primaryOpenRoom.roomMode
+                            primaryOpenRoom.roomMode,
+                            primaryOpenRoom.buyIn ?? (primaryOpenRoom.roomMode === 'bots' ? 100 : 200)
                           )
                         }
                         className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-semibold active:scale-95 transition-transform cursor-pointer"
@@ -706,7 +747,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                             room.code,
                             room.pacingMode,
                             room.name,
-                            room.roomMode
+                            room.roomMode,
+                            room.buyIn ?? (room.roomMode === 'bots' ? 100 : 200)
                           );
                         }}
                         className="flex-1 flex flex-col text-left min-w-0 cursor-pointer"
@@ -739,7 +781,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                           </span>
                         </div>
                         <span className="text-[11px] text-[#7c7d85] mt-0.5">
-                          #{room.code} · {room.playerCount}/{room.maxPlayers}{' '}
+                          #{room.code} · Entrada: {room.buyIn ?? (room.roomMode === 'bots' ? 100 : 200)} · {room.playerCount}/{room.maxPlayers}{' '}
                           jugadores · Ciegas {room.blindsLabel}
                         </span>
                       </button>
@@ -762,7 +804,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                               room.code,
                               room.pacingMode,
                               room.name,
-                              room.roomMode
+                              room.roomMode,
+                              room.buyIn ?? (room.roomMode === 'bots' ? 100 : 200)
                             );
                           }}
                           className="h-7 px-3 rounded-full bg-white text-black text-[12px] font-semibold flex items-center shrink-0 active:scale-95 transition-transform cursor-pointer"
@@ -812,7 +855,10 @@ export const Lobby: React.FC<LobbyProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSelectedRoomMode('bots')}
+                    onClick={() => {
+                      setSelectedRoomMode('bots');
+                      if (selectedBuyIn > 100) setSelectedBuyIn(100);
+                    }}
                     className={`h-8 rounded-full text-[12px] font-medium flex items-center justify-center gap-1 cursor-pointer ${
                       selectedRoomMode === 'bots'
                         ? 'bg-white text-black'
@@ -849,6 +895,45 @@ export const Lobby: React.FC<LobbyProps> = ({
                     <Clock className="w-3.5 h-3.5" />
                     <span>Por Turnos</span>
                   </button>
+                </div>
+
+                {/* Selector 3: Buy-in / Valor de la Mesa */}
+                <div className="flex flex-col gap-1.5 bg-black/60 p-2.5 rounded-[18px] border border-[#23252a]">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[11.5px] font-medium text-[#9ca3af]">
+                      Entrada a la mesa (Buy-in)
+                    </span>
+                    <span className="text-[12px] font-bold text-[#eab308]">
+                      🪙 {selectedBuyIn} fichas
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(selectedRoomMode === 'bots'
+                      ? [50, 100]
+                      : [100, 200, 300, 500]
+                    ).map((amt) => {
+                      const isSelected = selectedBuyIn === amt;
+                      return (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => setSelectedBuyIn(amt)}
+                          className={`h-7 rounded-[10px] text-[11.5px] font-medium transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-white text-black font-semibold'
+                              : 'bg-[#18191e] text-[#9ca3af] hover:text-white'
+                          }`}
+                        >
+                          {amt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedRoomMode === 'bots' && (
+                    <span className="text-[10px] text-[#7c7d85] px-1">
+                      En práctica con bots el buy-in máximo es 100 y la sesión dura máx. 100 manos.
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">

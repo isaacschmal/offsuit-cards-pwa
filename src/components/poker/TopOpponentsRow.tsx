@@ -39,13 +39,15 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
           );
         }
 
-        const isDealer = opp.seatIndex === dealerIndex;
-        const isTurn = !isShowdown && opp.seatIndex === currentTurnIndex;
+        const isEliminated = opp.status === 'out' || opp.stack <= 0;
+        const isDealer = !isEliminated && opp.seatIndex === dealerIndex;
+        const isTurn = !isShowdown && !isEliminated && opp.seatIndex === currentTurnIndex;
         const isFolded = opp.status === 'folded';
-        const showOverlayText =
-          opp.lastAction === 'Fold' || opp.lastAction === 'Raise'
-            ? opp.lastAction
-            : null;
+        const showOverlayText = isEliminated
+          ? 'OUT'
+          : opp.lastAction === 'Fold' || opp.lastAction === 'Raise'
+          ? opp.lastAction
+          : null;
 
         return (
           <div key={opp.id} className="flex flex-col items-center">
@@ -62,18 +64,26 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
             <div className="relative w-[48px] h-[48px] flex items-center justify-center">
               <div
                 className={`transition-opacity duration-200 ${
-                  isFolded || showOverlayText === 'Raise' ? 'opacity-30' : 'opacity-100'
+                  isEliminated
+                    ? 'opacity-20 grayscale'
+                    : isFolded || showOverlayText === 'Raise'
+                    ? 'opacity-30'
+                    : 'opacity-100'
                 }`}
               >
                 <Avatar3D avatarId={opp.avatarId} size={48} />
               </div>
 
-              {/* Action text overlay on avatar ('Fold' or 'Raise') */}
+              {/* Action text overlay on avatar ('OUT', 'Fold', or 'Raise') */}
               {showOverlayText && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <span
-                    className={`text-[12px] font-medium tracking-tight ${
-                      showOverlayText === 'Fold' ? 'text-white/55' : 'text-white'
+                    className={`text-[11px] font-semibold tracking-tight ${
+                      isEliminated
+                        ? 'text-red-400 bg-red-950/80 px-1.5 py-0.5 rounded-full border border-red-500/30'
+                        : showOverlayText === 'Fold'
+                        ? 'text-white/55'
+                        : 'text-white'
                     }`}
                   >
                     {showOverlayText}
@@ -96,7 +106,7 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
             {/* Player Name in subtle gray (#7c7d85) */}
             <span
               className={`mt-1 text-[10.5px] font-normal leading-tight text-[#7c7d85] truncate max-w-[64px] ${
-                isFolded ? 'opacity-40' : 'opacity-100'
+                isEliminated ? 'opacity-30 line-through' : isFolded ? 'opacity-40' : 'opacity-100'
               }`}
             >
               {opp.name}
@@ -104,8 +114,8 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
 
             {/* Stack count directly below in white (smoothly animated) */}
             <span
-              className={`mt-0.5 text-[12px] font-medium leading-tight text-white ${
-                isFolded ? 'opacity-30' : 'opacity-100'
+              className={`mt-0.5 text-[12px] font-medium leading-tight ${
+                isEliminated ? 'text-red-400/60' : isFolded ? 'text-white opacity-30' : 'text-white'
               }`}
             >
               <AnimatedNumber value={opp.stack} />

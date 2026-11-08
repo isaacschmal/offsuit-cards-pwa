@@ -14,6 +14,8 @@ export type RoomPlayersMode = 'real' | 'bots';
 export interface PokerTableState {
   roomId: string;
   roomMode?: RoomPlayersMode;
+  tableBuyIn?: number; // Configurable table buy-in (e.g. 100, 200, 300, 500)
+  maxHands?: number | null; // Capped at 100 in bot mode, null in real multiplayer
   stateVersion?: number;
   updatedBy?: string;
   players: Player[]; // index 0 is host/hero, 1..5 are seats 1..5
@@ -59,15 +61,22 @@ export function getSeatedPlayersCount(players: Player[]): number {
 export function createInitialTableState(
   roomId = 'local-offsuit',
   roomMode: RoomPlayersMode = 'bots',
-  useOpeningSeed = false
+  useOpeningSeed = false,
+  buyIn = 200
 ): PokerTableState {
   const isBotMode = roomMode === 'bots';
+  // Bot tables are capped at maximum 100 chips buy-in to prevent farming
+  const resolvedBuyIn = isBotMode ? Math.min(100, Math.max(20, buyIn)) : Math.max(50, buyIn);
+  const smallBlind = Math.max(1, Math.round(resolvedBuyIn / 100));
+  const bigBlind = Math.max(2, Math.round(resolvedBuyIn / 50));
+  const maxHands = isBotMode ? 100 : null;
+
   const players: Player[] = [
     {
       id: 'hero',
       name: 'You',
       avatarId: 'hero',
-      stack: 200,
+      stack: resolvedBuyIn,
       currentBet: 0,
       totalHandBet: 0,
       holeCards: [],
@@ -82,7 +91,7 @@ export function createInitialTableState(
             id: opp.id,
             name: opp.name,
             avatarId: opp.avatarId,
-            stack: 200,
+            stack: resolvedBuyIn,
             currentBet: 0,
             totalHandBet: 0,
             holeCards: [],
@@ -110,6 +119,8 @@ export function createInitialTableState(
   const baseState: PokerTableState = {
     roomId,
     roomMode,
+    tableBuyIn: resolvedBuyIn,
+    maxHands,
     stateVersion: 0,
     updatedBy: 'system',
     players,
@@ -120,11 +131,11 @@ export function createInitialTableState(
     dealerIndex: 2, // In 6-max bot mode advances to 3 (Bot Akash)
     currentTurnIndex: 0,
     street: 'preflop',
-    smallBlind: 1,
-    bigBlind: 2,
-    currentHighestBet: 2,
-    minRaiseTo: 4,
-    lastRaiseIncrement: 2,
+    smallBlind,
+    bigBlind,
+    currentHighestBet: bigBlind,
+    minRaiseTo: bigBlind * 2,
+    lastRaiseIncrement: bigBlind,
     actedPlayerIds: [],
     winnerIds: [],
     winningHandName: null,
@@ -148,7 +159,7 @@ export function seatPlayerInTable(
   const initialStack =
     typeof participant.stack === 'number' && participant.stack > 0
       ? Math.round(participant.stack)
-      : 200;
+      : (state.tableBuyIn ?? 200);
 
   // In bots mode, just keep seat 0 updated with local player's identity
   if (state.roomMode === 'bots') {
@@ -306,7 +317,18 @@ export function startNewHand(
   prevState: PokerTableState,
   useOpeningSeed = false
 ): PokerTableState {
-  // Replenish busted seated players; keep vacant seats ('empty-*') as 'out'
+  const isBotMode = prevState.roomMode === 'bots';
+
+  // In bot mode, cap at max 100 hands
+  if (isBotMode && prevState.handNumber >= 100) {
+    return {
+      ...prevState,
+      street: 'showdown',
+      stateVersion: (prevState.stateVersion ?? 0) + 1,
+    };
+  }
+
+  // Replenish ONLY if real player rebought; BOTS NEVER REGENERATE CHIPS!
   const refreshedPlayers: Player[] = prevState.players.map((p) => {
     if (isVacantSeat(p)) {
       return {
@@ -319,16 +341,45 @@ export function startNewHand(
         lastAction: null,
       };
     }
+
+    // Bots that busted lose permanently and DO NOT regenerate chips
+    if (p.isBot && p.stack <= 0) {
+      return {
+        ...p,
+        stack: 0,
+        currentBet: 0,
+        totalHandBet: 0,
+        holeCards: [] as Card[],
+        status: 'out' as const,
+        lastAction: 'Eliminado' as const,
+      };
+    }
+
+    const hasChips = p.stack > 0;
     return {
       ...p,
-      stack: p.stack <= 0 ? 200 : p.stack,
+      stack: Math.max(0, p.stack),
       currentBet: 0,
       totalHandBet: 0,
       holeCards: [] as Card[],
-      status: 'active' as const,
-      lastAction: null,
+      status: hasChips ? ('active' as const) : ('out' as const),
+      lastAction: hasChips ? null : ('Eliminado' as const),
     };
   });
+
+  const activePlayersWithChips = refreshedPlayers.filter(
+    (p) => !isVacantSeat(p) && p.status !== 'out' && p.stack > 0
+  );
+
+  // If fewer than 2 active players with chips, table cannot deal a new hand
+  if (activePlayersWithChips.length < 2) {
+    return {
+      ...prevState,
+      players: refreshedPlayers,
+      street: 'showdown',
+      stateVersion: (prevState.stateVersion ?? 0) + 1,
+    };
+  }
 
   const seatedCount = getSeatedPlayersCount(refreshedPlayers);
 

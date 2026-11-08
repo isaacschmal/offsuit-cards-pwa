@@ -9,6 +9,7 @@ import {
   CARD_BACK_ORDER,
   CARD_BACK_THEMES,
   type CardBackColorId,
+  claimBankruptcyBonus,
   computePlaystyleMetrics,
   DEFAULT_USER_PROFILE,
   type PlaystyleArchetype,
@@ -398,6 +399,30 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </span>
         </div>
       </button>
+
+      {/* Bankruptcy Recovery Bonus in Profile */}
+      {profile.bankroll <= 0 && (
+        <div className="mt-2.5 p-3 rounded-[18px] bg-red-950/40 border border-red-500/30 flex items-center justify-between gap-3">
+          <div className="flex flex-col text-left">
+            <span className="text-[12.5px] font-semibold text-red-200">
+              Bancarrota (0 fichas)
+            </span>
+            <span className="text-[11px] text-red-300/80">
+              Reclama 200 fichas de auxilio
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = claimBankruptcyBonus();
+              onProfileChange(next);
+            }}
+            className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-bold active:scale-95 transition-transform cursor-pointer"
+          >
+            +200 fichas
+          </button>
+        </div>
+      )}
 
       {/* Statistics Section + Playstyle Diamond Radar Chart */}
       <div className="mt-3">

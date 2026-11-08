@@ -79,7 +79,8 @@ export interface UserProfilePreferences {
   stats: PlayerPlaystyleStats;
 }
 
-export const PROFILE_STORAGE_KEY = 'juegos_de_cartas_profile_v2';
+export const PROFILE_STORAGE_KEY = 'juegos_de_cartas_profile_v3';
+const PROFILE_STORAGE_KEY_V2 = 'juegos_de_cartas_profile_v2';
 const KNOWN_PLAYERS_STORAGE_KEY = 'cartas_known_players_v2';
 
 export function generatePlayerId(): string {
@@ -94,7 +95,7 @@ export const DEFAULT_USER_PROFILE: UserProfilePreferences = {
   cardBackColor: 'slate',
   xp: 0,
   level: 1,
-  bankroll: 200,
+  bankroll: 1000,
   selectedEmote: '👋',
   unlockedEmotes: ['👋', '🔥', '😎', '🤝', '🍀', '🚀'],
   friends: [],
@@ -108,29 +109,54 @@ export const DEFAULT_USER_PROFILE: UserProfilePreferences = {
   },
 };
 
+let memoryUserProfile: UserProfilePreferences | null = null;
+
 export function loadUserProfile(): UserProfilePreferences {
   if (typeof window === 'undefined' || !window.localStorage) {
-    return DEFAULT_USER_PROFILE;
+    return memoryUserProfile ?? DEFAULT_USER_PROFILE;
   }
   try {
-    const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    let raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    let isMigrating = false;
+
+    // Check previous v2 storage if v3 is not found yet
+    if (!raw) {
+      const v2Raw = window.localStorage.getItem(PROFILE_STORAGE_KEY_V2);
+      if (v2Raw) {
+        raw = v2Raw;
+        isMigrating = true;
+      }
+    }
+
     if (!raw) {
       const fresh: UserProfilePreferences = {
         ...DEFAULT_USER_PROFILE,
         playerId: generatePlayerId(),
+        bankroll: 1000,
         friends: [],
         stats: { ...DEFAULT_USER_PROFILE.stats },
       };
       window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(fresh));
+      memoryUserProfile = fresh;
       return fresh;
     }
+
     const parsed = JSON.parse(raw) as Partial<UserProfilePreferences>;
     const resolvedPlayerId =
       typeof parsed.playerId === 'string' && parsed.playerId.trim().length > 0
         ? parsed.playerId
         : generatePlayerId();
-    const rawBankroll = typeof parsed.bankroll === 'number' ? parsed.bankroll : 200;
-    const resolvedBankroll = rawBankroll <= 0 ? 200 : rawBankroll;
+
+    // When migrating or for new users: if previous bankroll was the old 200 default or < 1000, upgrade to 1000!
+    let resolvedBankroll =
+      typeof parsed.bankroll === 'number' && !isNaN(parsed.bankroll)
+        ? Math.max(0, Math.round(parsed.bankroll))
+        : 1000;
+
+    if (isMigrating && resolvedBankroll <= 200) {
+      resolvedBankroll = 1000;
+    }
+
     const resolved: UserProfilePreferences = {
       ...DEFAULT_USER_PROFILE,
       ...parsed,
@@ -143,22 +169,27 @@ export function loadUserProfile(): UserProfilePreferences {
         ...(parsed.stats ?? {}),
       },
     };
-    if (!parsed.playerId) {
+
+    if (isMigrating || !parsed.playerId) {
       window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(resolved));
     }
+    memoryUserProfile = resolved;
     return resolved;
   } catch {
-    return DEFAULT_USER_PROFILE;
+    return memoryUserProfile ?? DEFAULT_USER_PROFILE;
   }
 }
 
 export function saveUserProfile(profile: UserProfilePreferences): UserProfilePreferences {
   const safeBankroll =
-    typeof profile.bankroll === 'number' && profile.bankroll > 0 ? profile.bankroll : 200;
+    typeof profile.bankroll === 'number' && !isNaN(profile.bankroll)
+      ? Math.max(0, Math.round(profile.bankroll))
+      : 1000;
   const normalized: UserProfilePreferences = {
     ...profile,
     bankroll: safeBankroll,
   };
+  memoryUserProfile = normalized;
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
       window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(normalized));
@@ -183,7 +214,10 @@ export function updateUserProfile(
   const next = updater(current);
   // Automatically recalculate level based on XP (every 250 XP per level)
   const computedLevel = Math.max(1, Math.floor(next.xp / 250) + 1);
-  const safeBankroll = typeof next.bankroll === 'number' && next.bankroll > 0 ? next.bankroll : 200;
+  const safeBankroll =
+    typeof next.bankroll === 'number' && !isNaN(next.bankroll)
+      ? Math.max(0, Math.round(next.bankroll))
+      : 1000;
   return saveUserProfile({
     ...next,
     level: computedLevel,
@@ -191,8 +225,46 @@ export function updateUserProfile(
   });
 }
 
+/**
+ * Deducts the table buy-in from the player's global wallet upon sitting at a table.
+ * Returns the actual amount deducted (capped to player's current bankroll).
+ */
+export function deductTableBuyIn(targetBuyIn: number): {
+  paid: number;
+  remainingBankroll: number;
+} {
+  const profile = loadUserProfile();
+  const paid = Math.min(Math.max(0, Math.round(targetBuyIn)), profile.bankroll);
+  const updated = updateUserProfile((prev) => ({
+    ...prev,
+    bankroll: Math.max(0, prev.bankroll - paid),
+  }));
+  return { paid, remainingBankroll: updated.bankroll };
+}
+
+/**
+ * Returns table chips back into the player's global wallet upon leaving the table.
+ */
+export function returnTableStack(finalStack: number): UserProfilePreferences {
+  const safeCredit = Math.max(0, Math.round(finalStack));
+  return updateUserProfile((prev) => ({
+    ...prev,
+    bankroll: prev.bankroll + safeCredit,
+  }));
+}
+
+/**
+ * Claims a 200-chip bankruptcy recovery bonus when player has 0 chips in their wallet.
+ */
+export function claimBankruptcyBonus(): UserProfilePreferences {
+  return updateUserProfile((prev) => ({
+    ...prev,
+    bankroll: prev.bankroll <= 0 ? 200 : prev.bankroll + 200,
+  }));
+}
+
 export function savePlayerBankroll(stack: number): UserProfilePreferences {
-  const safeStack = stack <= 0 ? 200 : Math.round(stack);
+  const safeStack = Math.max(0, Math.round(stack));
   return updateUserProfile((prev) => ({
     ...prev,
     bankroll: safeStack,

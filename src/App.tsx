@@ -10,11 +10,16 @@ import {
 import {
   getOrInitRoomState,
   loadOpenRooms,
+  loadPersistedRoomState,
   type RoomPacingMode,
   savePersistedRoomState,
   upsertOpenRoom,
 } from './lib/multiplayer';
-import { loadUserProfile } from './lib/profile';
+import {
+  deductTableBuyIn,
+  loadUserProfile,
+  returnTableStack,
+} from './lib/profile';
 import { connectToPokerRoom, type RoomSyncHandle } from './lib/supabase';
 
 function getInitialUrlRoomCode(): string | null {
@@ -48,7 +53,8 @@ export function App() {
       newCode: string,
       mode?: RoomPacingMode,
       customName?: string,
-      playersMode?: RoomPlayersMode
+      playersMode?: RoomPlayersMode,
+      buyIn?: number
     ) => {
       const normalized = newCode.trim().toUpperCase();
       const existingRoom = loadOpenRooms().find((r) => r.code === normalized);
@@ -59,21 +65,46 @@ export function App() {
         (normalized === 'BOTS' ? 'bots' : 'real');
       const resolvedName = customName ?? existingRoom?.name ?? `Sala #${normalized}`;
 
-      const roomState = getOrInitRoomState(normalized, resolvedPlayersMode);
+      const targetBuyIn =
+        resolvedPlayersMode === 'bots'
+          ? Math.min(100, buyIn ?? existingRoom?.buyIn ?? 100)
+          : (buyIn ?? existingRoom?.buyIn ?? 200);
+
+      // Check if user is already seated in this room with an active stack
+      const existingSaved = loadPersistedRoomState(normalized);
+      const profile = loadUserProfile();
+      const seatedHero = existingSaved?.players?.find((p) => p.id === profile.playerId);
+      const alreadyHasStack = seatedHero && seatedHero.stack > 0;
+
+      let effectiveStack = targetBuyIn;
+      if (!alreadyHasStack) {
+        const { paid } = deductTableBuyIn(targetBuyIn);
+        effectiveStack = paid;
+      }
+
+      const roomState = getOrInitRoomState(
+        normalized,
+        resolvedPlayersMode,
+        effectiveStack
+      );
       const realSeatedCount =
         resolvedPlayersMode === 'bots'
           ? 6
           : Math.max(1, getSeatedPlayersCount(roomState.players));
 
-      const profile = loadUserProfile();
+      const actualBuyIn = roomState.tableBuyIn ?? targetBuyIn;
+      const sb = Math.max(1, Math.round(actualBuyIn / 100));
+      const bb = Math.max(2, Math.round(actualBuyIn / 50));
+
       upsertOpenRoom({
         code: normalized,
         name: resolvedName,
         pacingMode: resolvedMode,
         roomMode: resolvedPlayersMode,
+        buyIn: actualBuyIn,
         playerCount: realSeatedCount,
         maxPlayers: 6,
-        blindsLabel: existingRoom?.blindsLabel ?? '1/2',
+        blindsLabel: `${sb}/${bb}`,
         turnTimerSeconds: resolvedMode === 'live' ? 20 : null,
         currentTurnPlayerName:
           existingRoom?.currentTurnPlayerName ?? (profile.name || 'Jugador'),
@@ -143,8 +174,11 @@ export function App() {
     [roomCode]
   );
 
-  const handleLeaveTableToLobby = useCallback(() => {
+  const handleLeaveTableToLobby = useCallback((finalStack?: number) => {
     pendingUrlRoomRef.current = null;
+    if (typeof finalStack === 'number' && finalStack > 0) {
+      returnTableStack(finalStack);
+    }
     if (typeof window !== 'undefined' && window.history?.replaceState) {
       try {
         window.history.replaceState({}, '', window.location.pathname);
@@ -162,7 +196,7 @@ export function App() {
         activePacingMode={pacingMode}
         onlineCount={onlineCount}
         onStartInstantTable={() =>
-          handleJoinOrCreateRoom('BOTS', 'live', 'Práctica vs Bots (IA)', 'bots')
+          handleJoinOrCreateRoom('BOTS', 'live', 'Práctica vs Bots (IA)', 'bots', 100)
         }
         onJoinOrCreateRoom={handleJoinOrCreateRoom}
       />

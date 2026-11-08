@@ -135,10 +135,10 @@ describe('Poker Table State Machine', () => {
     }
     expect(hands.size).toBeGreaterThan(1);
 
-    // Hero calls 2
+    // Hero calls 2 (starting with 100 buyIn in bot mode)
     const nextState = applyPlayerAction(state, 'hero', { type: 'call' });
     expect(nextState.players[0].currentBet).toBe(2);
-    expect(nextState.players[0].stack).toBe(198);
+    expect(nextState.players[0].stack).toBe(98);
     expect(nextState.currentTurnIndex).toBe(1); // Bot Emma's turn
   });
 
@@ -191,7 +191,7 @@ describe('Poker Table State Machine', () => {
     expect(realState.players[1].name).toBe('Leo');
     expect(realState.players[0].holeCards).toHaveLength(2);
     expect(realState.players[1].holeCards).toHaveLength(2);
-    expect(realState.currentHighestBet).toBe(2);
+    expect(realState.currentHighestBet).toBe(4);
   });
 });
 
@@ -325,14 +325,32 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
   });
 
   it('protects player bankroll and cleanly folds mid-hand when leaving via forceFoldPlayerForLeave', async () => {
-    const { forceFoldPlayerForLeave } = await import('../gameState');
-    const { DEFAULT_USER_PROFILE, savePlayerBankroll } = await import('../../../lib/profile');
+    const { forceFoldPlayerForLeave, startNewHand } = await import('../gameState');
+    const {
+      DEFAULT_USER_PROFILE,
+      savePlayerBankroll,
+      deductTableBuyIn,
+      returnTableStack,
+      claimBankruptcyBonus,
+    } = await import('../../../lib/profile');
 
-    expect(DEFAULT_USER_PROFILE.bankroll).toBe(200);
+    expect(DEFAULT_USER_PROFILE.bankroll).toBe(1000);
     const updatedProfile = savePlayerBankroll(185);
     expect(updatedProfile.bankroll).toBe(185);
-    // Auto-replenish to 200 if stack hits 0
-    expect(savePlayerBankroll(0).bankroll).toBe(200);
+    // Allows hitting 0 for true bankruptcy
+    expect(savePlayerBankroll(0).bankroll).toBe(0);
+
+    // Test bankruptcy claim
+    const recovered = claimBankruptcyBonus();
+    expect(recovered.bankroll).toBe(200);
+
+    // Test table buy-in deduction & return
+    savePlayerBankroll(1000);
+    const { paid, remainingBankroll } = deductTableBuyIn(200);
+    expect(paid).toBe(200);
+    expect(remainingBankroll).toBe(800);
+    const returned = returnTableStack(250);
+    expect(returned.bankroll).toBe(1050);
 
     let state = createInitialTableState('MESA1', 'real');
     state = seatPlayerInTable(state, { id: 'p_1', name: 'Isaac', avatarId: 'hero' }).state;
@@ -342,6 +360,20 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
     const folded = forceFoldPlayerForLeave(state, 'p_1');
     expect(folded.street).toBe('showdown');
     expect(folded.winnerIds).toContain('p_2');
+
+    // Test bot elimination & non-regeneration
+    let botTable = createInitialTableState('BOTS', 'bots');
+    // Set bot-emma stack to 0
+    botTable.players[1].stack = 0;
+    const nextHand = startNewHand(botTable, false);
+    expect(nextHand.players[1].status).toBe('out');
+    expect(nextHand.players[1].stack).toBe(0);
+    expect(nextHand.players[1].lastAction).toBe('Eliminado');
+
+    // Test bot 100-hand cap
+    botTable.handNumber = 100;
+    const capped = startNewHand(botTable, false);
+    expect(capped.street).toBe('showdown');
   });
 
   it('auto-expires live rooms after 2h, async rooms after 7d, and supports manual deleteOpenRoom', async () => {

@@ -12,7 +12,7 @@ export type GameMode = 'texas-holdem' | 'blackjack' | 'truco' | 'uno';
 
 export type PlayerStatus = 'active' | 'folded' | 'all-in' | 'out';
 
-export type LastAction = 'Fold' | 'Check' | 'Call' | 'Raise' | null;
+export type LastAction = 'Fold' | 'Check' | 'Call' | 'Raise' | 'Eliminado' | null;
 
 export interface Player {
   id: string;
