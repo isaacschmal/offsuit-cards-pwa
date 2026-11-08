@@ -11,6 +11,14 @@ export interface SidePot {
 
 export type RoomPlayersMode = 'real' | 'bots';
 
+export interface ShowdownContenderResult {
+  playerId: string;
+  handName: string;
+  score: number;
+  bestFiveCardIds: string[];
+  isWinner: boolean;
+}
+
 export interface PokerTableState {
   roomId: string;
   roomMode?: RoomPlayersMode;
@@ -34,6 +42,8 @@ export interface PokerTableState {
   actedPlayerIds: string[];
   winnerIds: string[];
   winningHandName: string | null;
+  winningCardIds?: string[];
+  showdownContenders?: ShowdownContenderResult[];
   handNumber: number;
 }
 
@@ -139,6 +149,8 @@ export function createInitialTableState(
     actedPlayerIds: [],
     winnerIds: [],
     winningHandName: null,
+    winningCardIds: [],
+    showdownContenders: [],
     handNumber: 0,
   };
 
@@ -454,6 +466,8 @@ export function startNewHand(
       actedPlayerIds: [],
       winnerIds: [],
       winningHandName: null,
+      winningCardIds: [],
+      showdownContenders: [],
       handNumber: prevState.handNumber + 1,
     };
   }
@@ -505,6 +519,8 @@ export function startNewHand(
     actedPlayerIds: [],
     winnerIds: [],
     winningHandName: null,
+    winningCardIds: [],
+    showdownContenders: [],
     handNumber: prevState.handNumber + 1,
   };
 }
@@ -562,6 +578,10 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
     const updatedPlayers = playersClearedBets.map((p) =>
       p.id === soleWinner.id ? { ...p, stack: p.stack + finalPot } : p
     );
+    const soleEval =
+      state.communityCards.length >= 3 && soleWinner
+        ? evaluateHoldemHand([...soleWinner.holeCards, ...state.communityCards])
+        : null;
     return {
       ...state,
       stateVersion: nextVersion,
@@ -569,7 +589,19 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
       collectedPot: finalPot,
       street: 'showdown',
       winnerIds: [soleWinner.id],
-      winningHandName: null,
+      winningHandName: soleEval?.categoryName ?? null,
+      winningCardIds: soleEval?.bestFive.map((c) => c.id) ?? [],
+      showdownContenders: soleWinner
+        ? [
+            {
+              playerId: soleWinner.id,
+              handName: soleEval?.categoryName ?? 'Mano Ganadora',
+              score: soleEval?.score ?? 0,
+              bestFiveCardIds: soleEval?.bestFive.map((c) => c.id) ?? [],
+              isWinner: true,
+            },
+          ]
+        : [],
     };
   }
 
@@ -647,6 +679,26 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
     return won > 0 ? { ...p, stack: p.stack + won } : p;
   });
 
+  const winningCardIdsSet = new Set<string>();
+  const showdownContenders: ShowdownContenderResult[] = [];
+
+  for (const c of contenders) {
+    const ev = evalMap.get(c.id);
+    if (!ev) continue;
+    const isWinner = overallWinnerIds.has(c.id);
+    const cardIds = ev.bestFive.map((card) => card.id);
+    if (isWinner) {
+      cardIds.forEach((id) => winningCardIdsSet.add(id));
+    }
+    showdownContenders.push({
+      playerId: c.id,
+      handName: ev.categoryName,
+      score: ev.score,
+      bestFiveCardIds: cardIds,
+      isWinner,
+    });
+  }
+
   return {
     ...state,
     stateVersion: nextVersion,
@@ -656,6 +708,8 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
     street: 'showdown',
     winnerIds: Array.from(overallWinnerIds),
     winningHandName: topHandName,
+    winningCardIds: Array.from(winningCardIdsSet),
+    showdownContenders,
   };
 }
 

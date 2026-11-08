@@ -1,4 +1,6 @@
 import React from 'react';
+import { formatRank, getSuitSymbol, isRedSuit } from '../../engine/deck';
+import type { ShowdownContenderResult } from '../../engine/poker/gameState';
 import type { Player } from '../../engine/types';
 import { AnimatedNumber } from './AnimatedNumber';
 import { Avatar3D } from './Avatar3D';
@@ -8,6 +10,8 @@ interface TopOpponentsRowProps {
   dealerIndex: number;
   currentTurnIndex: number;
   isShowdown?: boolean;
+  showdownContenders?: ShowdownContenderResult[];
+  winningCardIds?: string[];
 }
 
 export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
@@ -15,6 +19,8 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
   dealerIndex,
   currentTurnIndex,
   isShowdown = false,
+  showdownContenders = [],
+  winningCardIds = [],
 }) => {
   return (
     <div className="grid grid-cols-5 gap-1 w-full pt-0.5">
@@ -43,6 +49,10 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
         const isDealer = !isEliminated && opp.seatIndex === dealerIndex;
         const isTurn = !isShowdown && !isEliminated && opp.seatIndex === currentTurnIndex;
         const isFolded = opp.status === 'folded';
+        const contender = isShowdown ? showdownContenders.find((c) => c.playerId === opp.id) : null;
+        const isShowdownContender = Boolean(
+          isShowdown && !isFolded && !isEliminated && opp.holeCards && opp.holeCards.length === 2
+        );
         const showOverlayText = isEliminated
           ? 'OUT'
           : opp.lastAction === 'Fold' || opp.lastAction === 'Raise'
@@ -60,22 +70,62 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
               )}
             </div>
 
-            {/* Avatar + Dealer 'D' Badge + Action Overlay */}
+            {/* Avatar + Dealer 'D' Badge + Action Overlay + Showdown Cards */}
             <div className="relative w-[48px] h-[48px] flex items-center justify-center">
               <div
                 className={`transition-opacity duration-200 ${
                   isEliminated
                     ? 'opacity-20 grayscale'
-                    : isFolded || showOverlayText === 'Raise'
-                    ? 'opacity-30'
+                    : isFolded || showOverlayText === 'Raise' || isShowdownContender
+                    ? 'opacity-25'
                     : 'opacity-100'
                 }`}
               >
                 <Avatar3D avatarId={opp.avatarId} size={48} />
               </div>
 
+              {/* Showdown: 2 mini hole cards with served/winning cards highlighted and non-serving dimmed */}
+              {isShowdownContender && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center gap-0.5 pointer-events-none">
+                  {opp.holeCards.map((card, cIdx) => {
+                    const helped = contender
+                      ? contender.bestFiveCardIds.includes(card.id)
+                      : true;
+                    const isWinnerCard = Boolean(winningCardIds.includes(card.id));
+                    const red = isRedSuit(card.suit);
+                    return (
+                      <div
+                        key={`${card.id}-${cIdx}`}
+                        className={`w-[23px] h-[35px] bg-white rounded-[7px] p-0.5 flex flex-col justify-between items-center shadow-lg transition-all duration-300 ${
+                          !helped
+                            ? 'opacity-30 filter grayscale(50%)'
+                            : isWinnerCard
+                            ? 'ring-[2px] ring-[#eab308] shadow-[0_0_10px_rgba(234,179,8,0.7)] scale-105 z-10'
+                            : 'z-0'
+                        }`}
+                      >
+                        <span
+                          className={`text-[12px] font-bold leading-none ${
+                            red ? 'text-[#ef4444]' : 'text-[#18181b]'
+                          }`}
+                        >
+                          {formatRank(card.rank)}
+                        </span>
+                        <span
+                          className={`text-[10px] leading-none ${
+                            red ? 'text-[#ef4444]' : 'text-[#18181b]'
+                          }`}
+                        >
+                          {getSuitSymbol(card.suit)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Action text overlay on avatar ('OUT', 'Fold', or 'Raise') */}
-              {showOverlayText && (
+              {!isShowdownContender && showOverlayText && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <span
                     className={`text-[11px] font-semibold tracking-tight ${
@@ -111,6 +161,19 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
             >
               {opp.name}
             </span>
+
+            {/* Showdown Hand Category Name or Badge */}
+            {isShowdownContender && contender ? (
+              <span
+                className={`mt-0.5 text-[9px] px-1.5 py-0.5 rounded-full font-semibold truncate max-w-[66px] leading-none ${
+                  contender.isWinner
+                    ? 'bg-[#eab308] text-black shadow-sm'
+                    : 'bg-[#1e2028] text-[#9ca3af]'
+                }`}
+              >
+                {contender.isWinner ? `🏆 ${contender.handName}` : contender.handName}
+              </span>
+            ) : null}
 
             {/* Stack count directly below in white (smoothly animated) */}
             <span

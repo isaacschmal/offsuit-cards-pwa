@@ -1,10 +1,14 @@
 import {
   ArrowRight,
   Bell,
+  Check,
+  ChevronRight,
   Clock,
   Home,
+  Info,
   Plus,
   Smartphone,
+  Sparkles,
   Trash2,
   User,
   X,
@@ -49,6 +53,108 @@ interface LobbyProps {
   ) => void;
 }
 
+export interface CardGameItem {
+  id: string;
+  name: string;
+  category: string;
+  tag: string;
+  tagColor: string;
+  players: string;
+  description: string;
+  iconEmoji: string;
+  accentGradient: string;
+  status: 'active' | 'upcoming';
+  rules: string[];
+}
+
+export const CARD_GAMES: CardGameItem[] = [
+  {
+    id: 'poker',
+    name: "Texas Hold'em Poker",
+    category: 'Cartas & Apuestas',
+    tag: 'Disponible',
+    tagColor: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+    players: '2-6 Jugadores',
+    description: 'Póker sin límite. Botes compartidos, ciegas y partidas en vivo o por turnos.',
+    iconEmoji: '♠️',
+    accentGradient: 'from-blue-600/20 to-emerald-600/20',
+    status: 'active',
+    rules: [
+      'Cada jugador recibe 2 cartas privadas.',
+      'Se revelan 5 cartas comunitarias (Flop, Turn, River).',
+      'Forma la mejor combinación de 5 cartas para llevarte el bote.',
+    ],
+  },
+  {
+    id: 'uno',
+    name: 'UNO Classic',
+    category: 'Cartas & Fiesta',
+    tag: 'Próximamente',
+    tagColor: 'bg-[#fb923c]/15 text-[#fb923c] border-[#fb923c]/30',
+    players: '2-8 Jugadores',
+    description: 'Empareja colores y números. Cartas de acción +2, +4, reversa y cambio de color.',
+    iconEmoji: '🃏',
+    accentGradient: 'from-red-600/20 via-amber-600/20 to-blue-600/20',
+    status: 'upcoming',
+    rules: [
+      'Empareja la carta en juego por color o por número.',
+      'Usa cartas de acción: Roba 2, Salto, Reversa y Comodín +4.',
+      '¡No olvides cantar UNO cuando te quede una sola carta!',
+    ],
+  },
+  {
+    id: 'blackjack',
+    name: 'Blackjack (Veintiuno)',
+    category: 'Casino & Estrategia',
+    tag: 'Próximamente',
+    tagColor: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
+    players: '1-7 Jugadores',
+    description: 'Pide cartas o plántate. Supera la mano de la casa sin pasarte de 21.',
+    iconEmoji: '🎲',
+    accentGradient: 'from-indigo-600/20 to-purple-600/20',
+    status: 'upcoming',
+    rules: [
+      'El objetivo es sumar 21 o más que el crupier sin pasarte.',
+      'Las figuras valen 10 y el As vale 1 u 11.',
+      'Blackjack natural (As + 10/Figura) paga 3 a 2.',
+    ],
+  },
+  {
+    id: 'viuda',
+    name: 'La Viuda (Póker Tapado)',
+    category: 'Tradicional Mexicano',
+    tag: 'Próximamente',
+    tagColor: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+    players: '3-6 Jugadores',
+    description: 'Clásico de 5 cartas con baraja oculta central. Cambia tus cartas y compite por vidas.',
+    iconEmoji: '👑',
+    accentGradient: 'from-rose-600/20 to-amber-600/20',
+    status: 'upcoming',
+    rules: [
+      'Cada jugador recibe 5 cartas y hay una "viuda" de 5 cartas en el centro.',
+      'Elige jugar con tu mano o cambiarla por la viuda antes de que empiece la ronda.',
+      'Intercambia cartas una a una para armar tu mejor jugada.',
+    ],
+  },
+  {
+    id: 'conquian',
+    name: 'Conquián / Rummy',
+    category: 'Mazo Español',
+    tag: 'Próximamente',
+    tagColor: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+    players: '2-4 Jugadores',
+    description: 'El juego tradicional de combinaciones. Forma tercias y corridas para vaciar tu mano.',
+    iconEmoji: '🎴',
+    accentGradient: 'from-cyan-600/20 to-teal-600/20',
+    status: 'upcoming',
+    rules: [
+      'Se juega con baraja de 40 cartas.',
+      'Forma grupos de tres o más cartas (tercias o corridas).',
+      'El primero en bajar 9 cartas gana la partida.',
+    ],
+  },
+];
+
 export const Lobby: React.FC<LobbyProps> = ({
   activeRoomCode,
   activePacingMode,
@@ -77,6 +183,32 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [quickCodeInput, setQuickCodeInput] = useState('');
   const [copiedSafariCode, setCopiedSafariCode] = useState(false);
   const [safariBannerDismissed, setSafariBannerDismissed] = useState(false);
+
+  // Card Games Catalog & Voting modal
+  const [selectedGameForModal, setSelectedGameForModal] =
+    useState<CardGameItem | null>(null);
+  const [votedGameIds, setVotedGameIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('offsuit_voted_games');
+      return raw ? JSON.parse(raw) : ['uno'];
+    } catch {
+      return ['uno'];
+    }
+  });
+
+  const handleToggleVote = (gameId: string) => {
+    setVotedGameIds((prev) => {
+      const next = prev.includes(gameId)
+        ? prev.filter((id) => id !== gameId)
+        : [...prev, gameId];
+      try {
+        localStorage.setItem('offsuit_voted_games', JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   // Welcome First-Time Name & Avatar & Linking state
   const [welcomeName, setWelcomeName] = useState(() =>
@@ -247,60 +379,7 @@ export const Lobby: React.FC<LobbyProps> = ({
       : Math.min(0.95, Math.max(0.15, (profile.xp % 250) / 250));
   const strokeDashoffset = levelCircumference * (1 - levelFraction);
 
-  // Build dynamic Weekly Leaderboard from local player + real encountered players / friends
-  const leaderboardEntries = useMemo(() => {
-    const known = loadKnownPlayers();
-    const map = new Map<
-      string,
-      { id: string; name: string; avatarId: string; xp: number; isHero: boolean }
-    >();
 
-    // Local player is always present
-    map.set(profile.playerId, {
-      id: profile.playerId,
-      name: profile.name || 'Jugador',
-      avatarId: profile.avatarId,
-      xp: profile.xp,
-      isHero: true,
-    });
-
-    for (const kp of known) {
-      if (!kp.id || kp.id === profile.playerId) continue;
-      map.set(kp.id, {
-        id: kp.id,
-        name: kp.name,
-        avatarId: kp.avatarId,
-        xp: kp.xp ?? 0,
-        isHero: false,
-      });
-    }
-
-    for (const fr of profile.friends) {
-      if (!map.has(fr.id)) {
-        map.set(fr.id, {
-          id: fr.id,
-          name: fr.name,
-          avatarId: fr.avatarId,
-          xp: 0,
-          isHero: false,
-        });
-      }
-    }
-
-    const sorted = Array.from(map.values()).sort((a, b) => b.xp - a.xp);
-    const medals = ['🥇', '🥈', '🥉'];
-    const badges = ['🦐', '🦀', '🐬', '🦈', '🐋'];
-
-    return sorted.map((item, idx) => ({
-      rank: idx + 1,
-      medal: idx < 3 ? medals[idx] : null,
-      badgeEmoji: badges[Math.min(badges.length - 1, Math.floor(item.xp / 500))],
-      avatarId: item.avatarId,
-      name: item.name,
-      xpLabel: `${item.xp.toLocaleString('en-US')} XP`,
-      isHero: item.isHero,
-    }));
-  }, [profile]);
 
   return (
     <div className="h-[100dvh] max-h-[100dvh] overflow-hidden w-full bg-black text-white flex justify-center select-none">
@@ -780,67 +859,120 @@ export const Lobby: React.FC<LobbyProps> = ({
                   </div>
                 )}
 
-                {/* WEEKLY LEADERBOARD SECTION (Strictly real players) */}
-                <div className="mt-4">
-                  <div className="flex items-center justify-between px-1 mb-2">
-                    <h3 className="text-[16px] font-medium text-white tracking-tight">
-                      Weekly leaderboard
-                    </h3>
-                    <div className="flex items-center gap-1 text-[14px] font-medium text-[#9ca3af]">
-                      <span>{leaderboardEntries.length}</span>
-                      <span>🏆</span>
+                {/* CATÁLOGO DE JUEGOS DE CARTAS (Replaces Leaderboard) */}
+                <div className="mt-4 pb-6">
+                  <div className="flex items-center justify-between px-1 mb-2.5">
+                    <div>
+                      <h3 className="text-[16px] font-semibold text-white tracking-tight flex items-center gap-1.5">
+                        <span>Catálogo de Juegos</span>
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      </h3>
+                      <p className="text-[11px] text-[#7c7d85] -mt-0.5">
+                        Texas Hold'em, UNO y próximas modalidades
+                      </p>
                     </div>
+                    <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#1b1d24] text-[#9ca3af] border border-[#23252a]">
+                      {CARD_GAMES.length} juegos
+                    </span>
                   </div>
 
-                  <div className="bg-[#121316] border border-[#1d1f26] rounded-[20px] p-2 flex flex-col gap-1">
-                    {leaderboardEntries.map((entry) => (
-                      <div
-                        key={`${entry.rank}-${entry.name}`}
-                        className={`flex items-center justify-between px-2.5 py-2 rounded-[14px] ${
-                          entry.isHero ? 'bg-white/[0.04]' : ''
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-10 flex items-center gap-1 text-[13px] font-medium text-[#9ca3af]">
-                            {entry.medal ? (
-                              <>
-                                <span className="text-[15px] leading-none">
-                                  {entry.medal}
+                  <div className="flex flex-col gap-2.5">
+                    {CARD_GAMES.map((game) => {
+                      const isVoted = votedGameIds.includes(game.id);
+                      return (
+                        <div
+                          key={game.id}
+                          className="relative overflow-hidden bg-[#121316] border border-[#1d1f26] hover:border-[#282a33] transition-all rounded-[20px] p-3 flex flex-col gap-2"
+                        >
+                          {/* Top Row: Icon + Names + Tag */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2.5">
+                              <div
+                                className={`w-9 h-9 rounded-[12px] bg-gradient-to-br ${game.accentGradient} border border-white/10 flex items-center justify-center text-lg shrink-0`}
+                              >
+                                {game.id === 'uno' ? (
+                                  <div className="grid grid-cols-2 gap-0.5 p-1">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400"></div>
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                                  </div>
+                                ) : (
+                                  <span>{game.iconEmoji}</span>
+                                )}
+                              </div>
+                              <div className="flex flex-col text-left">
+                                <span className="text-[14px] font-semibold text-white leading-tight">
+                                  {game.name}
                                 </span>
-                                <span className="text-white font-semibold">
-                                  {entry.rank}
+                                <span className="text-[11px] text-[#8e9099] flex items-center gap-1 mt-0.5">
+                                  <span>{game.category}</span>
+                                  <span>·</span>
+                                  <span>{game.players}</span>
                                 </span>
-                              </>
-                            ) : (
-                              <span className="pl-5 text-[#7c7d85]">
-                                {entry.rank}
-                              </span>
-                            )}
-                          </div>
+                              </div>
+                            </div>
 
-                          <div className="relative w-7 h-7 rounded-full bg-[#1c1e24] flex items-center justify-center">
-                            <Avatar3D avatarId={entry.avatarId} size={26} />
-                            <span className="absolute -bottom-1 -right-1 text-[10px] leading-none">
-                              {entry.badgeEmoji}
+                            <span
+                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${game.tagColor} shrink-0`}
+                            >
+                              {game.tag}
                             </span>
                           </div>
 
-                          <span className="text-[14px] font-medium text-white">
-                            {entry.name}
-                          </span>
+                          {/* Description */}
+                          <p className="text-[11.5px] text-[#9ca3af] leading-relaxed line-clamp-2 text-left pl-0.5">
+                            {game.description}
+                          </p>
+
+                          {/* Bottom Action Row */}
+                          <div className="flex items-center justify-between pt-1 border-t border-[#1b1d24] mt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedGameForModal(game)}
+                              className="text-[11px] font-medium text-[#9ca3af] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <Info className="w-3.5 h-3.5 text-[#7c7d85]" />
+                              <span>Reglas & detalles</span>
+                              <ChevronRight className="w-3 h-3 text-[#7c7d85]" />
+                            </button>
+
+                            {game.status === 'active' ? (
+                              <button
+                                type="button"
+                                onClick={() => setIsRoomsModalOpen(true)}
+                                className="h-7 px-3.5 rounded-full bg-white text-black text-[11px] font-semibold flex items-center gap-1 active:scale-95 transition-transform cursor-pointer"
+                              >
+                                <span>Jugar Póker</span>
+                                <ArrowRight className="w-3 h-3" />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleVote(game.id)}
+                                className={`h-7 px-2.5 rounded-full text-[10.5px] font-medium flex items-center gap-1 active:scale-95 transition-all cursor-pointer border ${
+                                  isVoted
+                                    ? 'bg-[#22c55e]/15 text-[#4ade80] border-[#22c55e]/30'
+                                    : 'bg-[#181a20] text-[#a1a1aa] border-[#272930] hover:text-white'
+                                }`}
+                              >
+                                {isVoted ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-[#4ade80]" />
+                                    <span>¡Votado!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>👍</span>
+                                    <span>Votar modo</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
                         </div>
-
-                        <span className="text-[13px] font-normal text-[#8e9099]">
-                          {entry.xpLabel}
-                        </span>
-                      </div>
-                    ))}
-
-                    {leaderboardEntries.length === 1 && (
-                      <div className="px-2 py-1.5 text-[10.5px] text-[#7c7d85] text-center border-t border-[#1d1f26] mt-0.5">
-                        Solo tú estás registrado por ahora · Invita amigos a una sala para competir en el ranking
-                      </div>
-                    )}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -1336,6 +1468,140 @@ export const Lobby: React.FC<LobbyProps> = ({
                     Ir
                   </button>
                 </form>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* GAME DETAILS & RULES MODAL */}
+        {selectedGameForModal && (
+          <div
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+            onClick={() => setSelectedGameForModal(null)}
+          >
+            <div
+              className="bg-[#121316] border border-[#23252a] rounded-[24px] w-full max-w-sm p-5 text-white shadow-2xl flex flex-col gap-4 relative"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-11 h-11 rounded-[14px] bg-gradient-to-br ${selectedGameForModal.accentGradient} border border-white/10 flex items-center justify-center text-2xl shrink-0`}
+                  >
+                    {selectedGameForModal.id === 'uno' ? (
+                      <div className="grid grid-cols-2 gap-1 p-1">
+                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                        <div className="w-2 h-2 rounded-full bg-amber-400"></div>
+                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                      </div>
+                    ) : (
+                      <span>{selectedGameForModal.iconEmoji}</span>
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-[17px] font-semibold text-white leading-tight">
+                      {selectedGameForModal.name}
+                    </h3>
+                    <p className="text-[12px] text-[#8e9099] mt-0.5">
+                      {selectedGameForModal.category} · {selectedGameForModal.players}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedGameForModal(null)}
+                  className="w-8 h-8 rounded-full bg-[#1c1e24] text-[#9ca3af] hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Tag & Description */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full border ${selectedGameForModal.tagColor}`}
+                  >
+                    {selectedGameForModal.tag}
+                  </span>
+                  {selectedGameForModal.status === 'active' && (
+                    <span className="text-[10.5px] text-emerald-400 font-medium">
+                      Multiplayer en vivo y por turnos
+                    </span>
+                  )}
+                </div>
+                <p className="text-[12.5px] text-[#cbd5e1] leading-relaxed">
+                  {selectedGameForModal.description}
+                </p>
+              </div>
+
+              {/* Rules / Mechanics */}
+              <div className="bg-[#181a20] border border-[#23252a] rounded-[18px] p-3.5 flex flex-col gap-2">
+                <span className="text-[12px] font-semibold text-white flex items-center gap-1.5">
+                  <span>📜 Reglas y Dinámica</span>
+                </span>
+                <ul className="flex flex-col gap-2">
+                  {selectedGameForModal.rules.map((rule, idx) => (
+                    <li
+                      key={idx}
+                      className="text-[11.5px] text-[#9ca3af] flex items-start gap-2 leading-snug"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80 mt-1 shrink-0" />
+                      <span>{rule}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Footer CTA */}
+              <div className="flex items-center gap-2 pt-1">
+                {selectedGameForModal.status === 'active' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedGameForModal(null);
+                      setIsRoomsModalOpen(true);
+                    }}
+                    className="flex-1 h-11 rounded-full bg-white text-black font-semibold text-[13px] flex items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+                  >
+                    <span>Jugar Mesa de Póker</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleVote(selectedGameForModal.id)}
+                      className={`flex-1 h-11 rounded-full text-[12.5px] font-semibold flex items-center justify-center gap-2 border transition-all cursor-pointer ${
+                        votedGameIds.includes(selectedGameForModal.id)
+                          ? 'bg-[#22c55e]/15 text-[#4ade80] border-[#22c55e]/30'
+                          : 'bg-[#1e2027] text-white border-[#2e313b] hover:bg-[#252831]'
+                      }`}
+                    >
+                      {votedGameIds.includes(selectedGameForModal.id) ? (
+                        <>
+                          <Check className="w-4 h-4 text-[#4ade80]" />
+                          <span>¡Votaste por este juego!</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>👍</span>
+                          <span>Votar para que salga primero</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGameForModal(null)}
+                      className="h-11 px-4 rounded-full bg-[#181a20] border border-[#23252a] text-[#a1a1aa] text-[12.5px] font-medium hover:text-white cursor-pointer"
+                    >
+                      Cerrar
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

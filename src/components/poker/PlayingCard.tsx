@@ -156,6 +156,8 @@ interface CommunityCardSlotProps {
   index: number;
   handNumber?: number;
   cardBackColor?: CardBackColorId;
+  isWinningCard?: boolean;
+  isDimmed?: boolean;
 }
 
 /**
@@ -168,6 +170,8 @@ export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({
   index,
   handNumber = 1,
   cardBackColor,
+  isWinningCard = false,
+  isDimmed = false,
 }) => {
   const overlapClass = index > 0 ? '-ml-[3px]' : '';
   const [lastRevealedCard, setLastRevealedCard] = useState<Card | undefined>(card);
@@ -227,7 +231,13 @@ export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({
 
         {/* Front Face (180deg) */}
         <div
-          className="absolute inset-0 w-full h-full bg-white rounded-[18px] p-2.5 flex flex-col justify-between items-start shadow-[-6px_0_16px_rgba(0,0,0,0.18)]"
+          className={`absolute inset-0 w-full h-full bg-white rounded-[18px] p-2.5 flex flex-col justify-between items-start transition-all duration-300 ${
+            isWinningCard
+              ? 'ring-[2.5px] ring-[#eab308] shadow-[0_0_18px_rgba(234,179,8,0.55)] z-20 scale-[1.04]'
+              : isDimmed
+              ? 'opacity-30 filter grayscale(50%)'
+              : 'shadow-[-6px_0_16px_rgba(0,0,0,0.18)]'
+          }`}
           style={{
             backfaceVisibility: 'hidden',
             WebkitBackfaceVisibility: 'hidden',
@@ -260,6 +270,9 @@ interface HoleCardsBlockProps {
   folded?: boolean;
   canDragToFold?: boolean;
   onFoldTrigger?: () => void;
+  winningCardIds?: string[];
+  heroBestFiveIds?: string[];
+  isShowdown?: boolean;
 }
 
 /**
@@ -273,6 +286,9 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
   folded = false,
   canDragToFold = false,
   onFoldTrigger,
+  winningCardIds,
+  heroBestFiveIds,
+  isShowdown = false,
 }) => {
   const [isThrown, setIsThrown] = useState(false);
 
@@ -298,6 +314,11 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
   const firstRed = isRedSuit(first.suit);
   const secondRed = isRedSuit(second.suit);
   const dragEnabled = canDragToFold && !folded && !isThrown;
+
+  const firstHelped = heroBestFiveIds ? heroBestFiveIds.includes(first.id) : true;
+  const secondHelped = heroBestFiveIds ? heroBestFiveIds.includes(second.id) : true;
+  const firstIsWinner = Boolean(isShowdown && winningCardIds?.includes(first.id));
+  const secondIsWinner = Boolean(isShowdown && winningCardIds?.includes(second.id));
 
   const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (!dragEnabled) return;
@@ -350,7 +371,13 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
           delay: 0.12,
           ease: [0.22, 1, 0.36, 1],
         }}
-        className="w-[58%] h-full bg-white rounded-[22px] px-3.5 py-3 flex flex-col justify-between items-start"
+        className={`w-[58%] h-full bg-white rounded-[22px] px-3.5 py-3 flex flex-col justify-between items-start transition-all duration-300 ${
+          isShowdown && !firstHelped
+            ? 'opacity-30 filter grayscale(50%)'
+            : firstIsWinner
+            ? 'ring-[2.5px] ring-[#eab308] shadow-[0_0_18px_rgba(234,179,8,0.55)] z-20'
+            : ''
+        }`}
       >
         <span
           className={`text-[36px] font-normal leading-none tracking-tight ${
@@ -374,7 +401,13 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
           delay: 0.24,
           ease: [0.22, 1, 0.36, 1],
         }}
-        className="w-[58%] h-full bg-white rounded-[22px] px-3.5 py-3 flex flex-col justify-between items-start -ml-[16%] shadow-[-10px_0_24px_rgba(0,0,0,0.22)]"
+        className={`w-[58%] h-full bg-white rounded-[22px] px-3.5 py-3 flex flex-col justify-between items-start -ml-[16%] transition-all duration-300 ${
+          isShowdown && !secondHelped
+            ? 'opacity-30 filter grayscale(50%)'
+            : secondIsWinner
+            ? 'ring-[2.5px] ring-[#eab308] shadow-[0_0_18px_rgba(234,179,8,0.55)] z-20'
+            : 'shadow-[-10px_0_24px_rgba(0,0,0,0.22)]'
+        }`}
       >
         <span
           className={`text-[36px] font-normal leading-none tracking-tight ${

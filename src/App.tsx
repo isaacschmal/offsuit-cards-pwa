@@ -103,20 +103,22 @@ export function App() {
       const bb = Math.max(2, Math.round(actualBuyIn / 50));
       const profile = loadUserProfile();
 
-      upsertOpenRoom({
-        code: normalized,
-        name: resolvedName,
-        pacingMode: resolvedMode,
-        roomMode: resolvedPlayersMode,
-        buyIn: actualBuyIn,
-        playerCount: realSeatedCount,
-        maxPlayers: 6,
-        blindsLabel: `${sb}/${bb}`,
-        turnTimerSeconds: resolvedMode === 'live' ? 20 : null,
-        currentTurnPlayerName:
-          existingRoom?.currentTurnPlayerName ?? (profile.name || 'Jugador'),
-        updatedAt: Date.now(),
-      });
+      if (resolvedPlayersMode !== 'bots' && normalized !== 'BOTS') {
+        upsertOpenRoom({
+          code: normalized,
+          name: resolvedName,
+          pacingMode: resolvedMode,
+          roomMode: resolvedPlayersMode,
+          buyIn: actualBuyIn,
+          playerCount: realSeatedCount,
+          maxPlayers: 6,
+          blindsLabel: `${sb}/${bb}`,
+          turnTimerSeconds: resolvedMode === 'live' ? 20 : null,
+          currentTurnPlayerName:
+            existingRoom?.currentTurnPlayerName ?? (profile.name || 'Jugador'),
+          updatedAt: Date.now(),
+        });
+      }
 
       setRoomCode(normalized);
       setRoomName(resolvedName);

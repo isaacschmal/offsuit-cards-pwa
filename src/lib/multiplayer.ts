@@ -427,7 +427,9 @@ export function loadOpenRooms(now = Date.now()): OpenRoomInfo[] {
       ...r,
       roomMode: r.roomMode ?? (r.code === 'BOTS' ? 'bots' : 'real'),
     }));
-    const valid = normalized.filter((r) => !isRoomExpired(r, now));
+    const valid = normalized.filter(
+      (r) => !isRoomExpired(r, now) && r.roomMode !== 'bots' && r.code !== 'BOTS'
+    );
     if (valid.length !== normalized.length) {
       for (const r of normalized) {
         if (isRoomExpired(r, now)) {
@@ -488,8 +490,12 @@ export function mergeOpenRoomsList(
 }
 
 export function upsertOpenRoom(room: OpenRoomInfo): OpenRoomInfo[] {
-  const existing = loadOpenRooms();
   const normalizedCode = room.code.trim().toUpperCase();
+  // Bot practice sessions are private solo games; never list in public rooms directory
+  if (room.roomMode === 'bots' || normalizedCode === 'BOTS') {
+    return loadOpenRooms();
+  }
+  const existing = loadOpenRooms();
   clearDeletedRoomTimestamp(normalizedCode);
   const idx = existing.findIndex((r) => r.code === normalizedCode);
   let updated: OpenRoomInfo[];
@@ -560,7 +566,9 @@ export function createNewOpenRoom(
     updatedAt: Date.now(),
   };
 
-  upsertOpenRoom(newRoom);
+  if (roomMode !== 'bots' && code !== 'BOTS') {
+    upsertOpenRoom(newRoom);
+  }
   return newRoom;
 }
 

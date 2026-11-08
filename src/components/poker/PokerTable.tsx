@@ -450,20 +450,33 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             dealerIndex={tableState.dealerIndex}
             currentTurnIndex={tableState.currentTurnIndex}
             isShowdown={tableState.street === 'showdown'}
+            showdownContenders={tableState.showdownContenders}
+            winningCardIds={tableState.winningCardIds}
           />
         </div>
 
         {/* CENTER SECTION: 5 Community Cards + Bare Animated Pot Number */}
         <div className="my-auto py-1.5 shrink-0">
           <div className="grid grid-cols-5 items-center w-full">
-            {[0, 1, 2, 3, 4].map((slotIdx) => (
-              <CommunityCardSlot
-                key={slotIdx}
-                index={slotIdx}
-                handNumber={tableState.handNumber}
-                card={tableState.communityCards[slotIdx]}
-              />
-            ))}
+            {[0, 1, 2, 3, 4].map((slotIdx) => {
+              const card = tableState.communityCards[slotIdx];
+              const isShowdown = tableState.street === 'showdown';
+              const winningIds = tableState.winningCardIds ?? [];
+              const isWinning = Boolean(isShowdown && card && winningIds.includes(card.id));
+              const isDimmed = Boolean(
+                isShowdown && winningIds.length > 0 && card && !isWinning
+              );
+              return (
+                <CommunityCardSlot
+                  key={slotIdx}
+                  index={slotIdx}
+                  handNumber={tableState.handNumber}
+                  card={card}
+                  isWinningCard={isWinning}
+                  isDimmed={isDimmed}
+                />
+              );
+            })}
           </div>
 
           {/* Bare Pot Number directly below the 5th (rightmost) community card */}
@@ -701,13 +714,29 @@ export const PokerTable: React.FC<PokerTableProps> = ({
           {/* BOTTOM SPLIT HUD: Left (2 Draggable/Flickable Hole Cards) | Right (Swipeable Player/Odds Widget) */}
           <div className="grid grid-cols-2 gap-3 h-[128px] items-stretch relative">
             {/* Left Column: Unified 2 Hole Cards with dealing animation + Throw-to-Fold upward flick gesture */}
-            <HoleCardsBlock
-              cards={hero.holeCards}
-              handNumber={tableState.handNumber}
-              folded={hero.status === 'folded'}
-              canDragToFold={isHeroTurn}
-              onFoldTrigger={() => handleHeroAction({ type: 'fold' })}
-            />
+            {(() => {
+              const isShowdown = tableState.street === 'showdown';
+              const heroContender = tableState.showdownContenders?.find(
+                (c) =>
+                  c.playerId === hero.id ||
+                  c.playerId === profileState.playerId ||
+                  (resolvedHeroIndex === 0 &&
+                    (c.playerId === 'hero' ||
+                      c.playerId === tableState.players[0]?.id))
+              );
+              return (
+                <HoleCardsBlock
+                  cards={hero.holeCards}
+                  handNumber={tableState.handNumber}
+                  folded={hero.status === 'folded'}
+                  canDragToFold={isHeroTurn}
+                  onFoldTrigger={() => handleHeroAction({ type: 'fold' })}
+                  winningCardIds={tableState.winningCardIds}
+                  heroBestFiveIds={heroContender?.bestFiveCardIds}
+                  isShowdown={isShowdown}
+                />
+              );
+            })()}
 
             {/* Right Column: Swipeable Dark Rounded HUD Container (Swipe Up/Down or Left/Right to switch faces) */}
             <div className="relative h-[128px]">
