@@ -49,35 +49,60 @@ export interface PlayerPlaystyleStats {
   handsWon: number;
 }
 
-export interface UserProfilePreferences {
+export interface FriendEntry {
+  id: string;
   name: string;
+  avatarId: string;
+  addedAt: number;
+}
+
+export interface KnownPlayerEntry {
+  id: string;
+  name: string;
+  avatarId: string;
+  xp: number;
+  updatedAt: number;
+}
+
+export interface UserProfilePreferences {
+  playerId: string;
+  name: string;
+  hasSetCustomName: boolean;
   avatarId: string;
   cardBackColor: CardBackColorId;
   xp: number;
   level: number;
   selectedEmote: string;
   unlockedEmotes: string[];
+  friends: FriendEntry[];
   stats: PlayerPlaystyleStats;
 }
 
-const PROFILE_STORAGE_KEY = 'juegos_de_cartas_profile_v1';
+export const PROFILE_STORAGE_KEY = 'juegos_de_cartas_profile_v2';
+const KNOWN_PLAYERS_STORAGE_KEY = 'cartas_known_players_v2';
+
+export function generatePlayerId(): string {
+  return 'p_' + Math.random().toString(36).slice(2, 10);
+}
 
 export const DEFAULT_USER_PROFILE: UserProfilePreferences = {
-  name: 'isaac',
+  playerId: generatePlayerId(),
+  name: 'Jugador',
+  hasSetCustomName: false,
   avatarId: 'hero',
   cardBackColor: 'slate',
-  xp: 516,
-  level: 2,
+  xp: 0,
+  level: 1,
   selectedEmote: '👋',
   unlockedEmotes: ['👋', '🔥', '😎', '🤝', '🍀', '🚀'],
-  // Initial stats calibrated to Loose-Aggressive (LAG) matching image_2.png
+  friends: [],
   stats: {
-    handsPlayed: 28,
-    vpipCount: 19,
-    aggressiveCount: 24,
-    passiveCount: 11,
-    foldCount: 9,
-    handsWon: 12,
+    handsPlayed: 0,
+    vpipCount: 0,
+    aggressiveCount: 0,
+    passiveCount: 0,
+    foldCount: 0,
+    handsWon: 0,
   },
 };
 
@@ -88,18 +113,35 @@ export function loadUserProfile(): UserProfilePreferences {
   try {
     const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
     if (!raw) {
-      window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(DEFAULT_USER_PROFILE));
-      return DEFAULT_USER_PROFILE;
+      const fresh: UserProfilePreferences = {
+        ...DEFAULT_USER_PROFILE,
+        playerId: generatePlayerId(),
+        friends: [],
+        stats: { ...DEFAULT_USER_PROFILE.stats },
+      };
+      window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(fresh));
+      return fresh;
     }
     const parsed = JSON.parse(raw) as Partial<UserProfilePreferences>;
-    return {
+    const resolvedPlayerId =
+      typeof parsed.playerId === 'string' && parsed.playerId.trim().length > 0
+        ? parsed.playerId
+        : generatePlayerId();
+    const resolved: UserProfilePreferences = {
       ...DEFAULT_USER_PROFILE,
       ...parsed,
+      playerId: resolvedPlayerId,
+      hasSetCustomName: Boolean(parsed.hasSetCustomName),
+      friends: Array.isArray(parsed.friends) ? parsed.friends : [],
       stats: {
         ...DEFAULT_USER_PROFILE.stats,
         ...(parsed.stats ?? {}),
       },
     };
+    if (!parsed.playerId) {
+      window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(resolved));
+    }
+    return resolved;
   } catch {
     return DEFAULT_USER_PROFILE;
   }
@@ -109,6 +151,12 @@ export function saveUserProfile(profile: UserProfilePreferences): UserProfilePre
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
       window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+      upsertKnownPlayer({
+        id: profile.playerId,
+        name: profile.name || 'Jugador',
+        avatarId: profile.avatarId,
+        xp: profile.xp,
+      });
       window.dispatchEvent(new CustomEvent('cartas-profile-updated', { detail: profile }));
     } catch {
       // ignore storage errors
@@ -128,6 +176,60 @@ export function updateUserProfile(
     ...next,
     level: computedLevel,
   });
+}
+
+export function loadKnownPlayers(): KnownPlayerEntry[] {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(KNOWN_PLAYERS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as KnownPlayerEntry[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function upsertKnownPlayer(entry: {
+  id: string;
+  name: string;
+  avatarId: string;
+  xp?: number;
+}): KnownPlayerEntry[] {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  if (!entry.id || entry.id.startsWith('bot-') || entry.id.startsWith('empty-')) {
+    return loadKnownPlayers();
+  }
+  try {
+    const existing = loadKnownPlayers();
+    const idx = existing.findIndex((p) => p.id === entry.id);
+    let updated: KnownPlayerEntry[];
+    if (idx >= 0) {
+      updated = [...existing];
+      updated[idx] = {
+        ...existing[idx],
+        name: entry.name || existing[idx].name,
+        avatarId: entry.avatarId || existing[idx].avatarId,
+        xp: typeof entry.xp === 'number' ? Math.max(existing[idx].xp, entry.xp) : existing[idx].xp,
+        updatedAt: Date.now(),
+      };
+    } else {
+      updated = [
+        ...existing,
+        {
+          id: entry.id,
+          name: entry.name || 'Jugador',
+          avatarId: entry.avatarId || 'hero',
+          xp: entry.xp ?? 0,
+          updatedAt: Date.now(),
+        },
+      ];
+    }
+    window.localStorage.setItem(KNOWN_PLAYERS_STORAGE_KEY, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return [];
+  }
 }
 
 export function cycleCardBackColor(): UserProfilePreferences {
@@ -184,18 +286,28 @@ export interface PlaystyleRadarMetrics {
   loose: number; // 0.15 .. 1.0 (Right vertex)
   passive: number; // 0.15 .. 1.0 (Bottom vertex)
   tight: number; // 0.15 .. 1.0 (Left vertex)
-  archetype: PlaystyleArchetype;
+  archetype: PlaystyleArchetype | null;
 }
 
 /**
  * Computes normalized [0.15 .. 0.95] diamond radar axis values and active archetype
- * ('LAG', 'TAG', 'ROCK', 'FISH') from the player's tracked statistics.
+ * ('LAG', 'TAG', 'ROCK', 'FISH', or null when no hands played yet) from tracked statistics.
  */
 export function computePlaystyleMetrics(stats: PlayerPlaystyleStats): PlaystyleRadarMetrics {
-  const totalDecisions = Math.max(
-    1,
-    stats.aggressiveCount + stats.passiveCount + stats.foldCount
-  );
+  const rawTotalActions =
+    stats.aggressiveCount + stats.passiveCount + stats.foldCount;
+
+  if (stats.handsPlayed === 0 || rawTotalActions === 0) {
+    return {
+      aggressive: 0.18,
+      loose: 0.18,
+      passive: 0.18,
+      tight: 0.18,
+      archetype: null,
+    };
+  }
+
+  const totalDecisions = Math.max(1, rawTotalActions);
   const activeDecisions = Math.max(1, stats.aggressiveCount + stats.passiveCount);
 
   // Looseness ratio: how often player enters pots vs folds

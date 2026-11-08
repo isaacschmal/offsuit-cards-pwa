@@ -1,12 +1,14 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowUp, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Check, Share2, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { calculateHoldemEquity } from '../../engine/poker/equity';
 import { evaluateHoldemHand } from '../../engine/poker/evaluator';
 import {
   applyPlayerAction,
   getBotDecision,
+  getSeatedPlayersCount,
   getTotalPot,
+  isVacantSeat,
   type PlayerActionInput,
   type PokerTableState,
   startNewHand,
@@ -47,13 +49,14 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   const [isSliderOpen, setIsSliderOpen] = useState(false);
   const [sliderAmount, setSliderAmount] = useState<number>(initialState.minRaiseTo);
   const [hudOddsMode, setHudOddsMode] = useState<boolean>(false);
-  const [heroAvatarId, setHeroAvatarId] = useState<string>(() => loadUserProfile().avatarId);
+  const [profileState, setProfileState] = useState(() => loadUserProfile());
+  const [copiedRoomInvite, setCopiedRoomInvite] = useState(false);
   const prevTurnIndexRef = useRef<number>(initialState.currentTurnIndex);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const syncProfile = () => {
-      setHeroAvatarId(loadUserProfile().avatarId);
+      setProfileState(loadUserProfile());
     };
     window.addEventListener('cartas-profile-updated', syncProfile);
     return () => window.removeEventListener('cartas-profile-updated', syncProfile);
@@ -65,19 +68,38 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     }
   }, [externalState]);
 
-  const hero = tableState.players[0];
-  const opponents = tableState.players.slice(1, 6);
+  const resolvedHeroIndex = useMemo(() => {
+    const idx = tableState.players.findIndex((p) => p.id === profileState.playerId);
+    return idx >= 0 ? idx : 0;
+  }, [tableState.players, profileState.playerId]);
+
+  const hero = tableState.players[resolvedHeroIndex] ?? tableState.players[0];
+
+  const opponents = useMemo(() => {
+    return [1, 2, 3, 4, 5].map(
+      (offset) => tableState.players[(resolvedHeroIndex + offset) % 6]
+    );
+  }, [tableState.players, resolvedHeroIndex]);
+
   const currentActor = tableState.players[tableState.currentTurnIndex];
   const isRealFriendsRoom = tableState.roomMode === 'real';
+  const seatedCount = useMemo(
+    () => getSeatedPlayersCount(tableState.players),
+    [tableState.players]
+  );
 
   const isHeroTurn =
     tableState.street !== 'showdown' &&
-    tableState.currentTurnIndex === 0 &&
+    seatedCount >= 2 &&
+    tableState.currentTurnIndex === resolvedHeroIndex &&
     hero.status === 'active';
 
   const toCall = Math.max(0, tableState.currentHighestBet - hero.currentBet);
   const maxHeroBet = hero.currentBet + hero.stack;
-  const minRaiseBet = Math.min(maxHeroBet, Math.max(tableState.minRaiseTo, tableState.bigBlind * 2));
+  const minRaiseBet = Math.min(
+    maxHeroBet,
+    Math.max(tableState.minRaiseTo, tableState.bigBlind * 2)
+  );
 
   // Keep sliderAmount synced when turn or minRaiseBet updates
   useEffect(() => {
@@ -87,12 +109,13 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
   // Trigger PWA / Web Notification when turn transitions from an opponent to Hero in async mode
   useEffect(() => {
-    const wasOpponentTurn = prevTurnIndexRef.current !== 0;
+    const wasOpponentTurn = prevTurnIndexRef.current !== resolvedHeroIndex;
     prevTurnIndexRef.current = tableState.currentTurnIndex;
 
     if (
       wasOpponentTurn &&
-      tableState.currentTurnIndex === 0 &&
+      seatedCount >= 2 &&
+      tableState.currentTurnIndex === resolvedHeroIndex &&
       tableState.street !== 'showdown' &&
       hero.status === 'active'
     ) {
@@ -102,6 +125,8 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     }
   }, [
     tableState,
+    resolvedHeroIndex,
+    seatedCount,
     hero.status,
     pacingMode,
     roomName,
@@ -134,37 +159,37 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   }, [hero.holeCards, tableState.communityCards]);
 
   const activeOpponentCount = useMemo(() => {
-    return opponents.filter((o) => o.status !== 'folded').length;
+    return opponents.filter((o) => !isVacantSeat(o) && o.status !== 'folded' && o.status !== 'out')
+      .length;
   }, [opponents]);
 
   const heroEquity = useMemo(() => {
-    // Match exact screenshot values (26% Win, 39% Two Pair) on the opening 9♠ 9♥ hand preflop
-    if (
-      tableState.handNumber === 1 &&
-      tableState.street === 'preflop' &&
-      hero.holeCards[0]?.rank === 9 &&
-      hero.holeCards[1]?.rank === 9
-    ) {
-      return {
-        winPct: 26,
-        tiePct: 1,
-        nextHandLabel: 'Two Pair' as const,
-        nextHandPct: 39,
-      };
-    }
     return calculateHoldemEquity(
       hero.holeCards,
       tableState.communityCards,
-      activeOpponentCount,
+      Math.max(1, activeOpponentCount),
       500
     );
-  }, [
-    tableState.handNumber,
-    tableState.street,
-    hero.holeCards,
-    tableState.communityCards,
-    activeOpponentCount,
-  ]);
+  }, [hero.holeCards, tableState.communityCards, activeOpponentCount]);
+
+  const handleShareRoomLink = async () => {
+    const shareUrl = `${window.location.origin}/?room=${encodeURIComponent(tableState.roomId)}`;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Sala #${tableState.roomId} · Juegos de Cartas`,
+          text: `Únete a mi mesa de póker (${roomName}) con el código #${tableState.roomId}:`,
+          url: shareUrl,
+        });
+        return;
+      } catch {
+        // Fallback to clipboard
+      }
+    }
+    navigator.clipboard?.writeText(shareUrl);
+    setCopiedRoomInvite(true);
+    setTimeout(() => setCopiedRoomInvite(false), 2000);
+  };
 
   const handleHeroAction = (action: PlayerActionInput) => {
     if (!isHeroTurn) return;
@@ -179,9 +204,14 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     onBroadcastState?.(next);
   };
 
-  // In a Real Friends room (sin bots), allow advancing a friend's seat manually if testing on 1 device
+  // In a Real Friends room (sin bots), allow advancing a friend's seat manually if playing pass-and-play on 1 device
   const handleFriendSeatAction = (action: PlayerActionInput) => {
-    if (tableState.street === 'showdown' || !currentActor || currentActor.id === hero.id) {
+    if (
+      tableState.street === 'showdown' ||
+      !currentActor ||
+      currentActor.id === hero.id ||
+      isVacantSeat(currentActor)
+    ) {
       return;
     }
     const next = applyPlayerAction(tableState, currentActor.id, action);
@@ -230,7 +260,6 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     const deltaY = e.clientY - swipeStartRef.current.y;
     swipeStartRef.current = null;
 
-    // Require an intentional swipe gesture (> 18px vertically or > 20px horizontally)
     if (deltaY < -18 || deltaX < -20) {
       setHudOddsMode(true);
     } else if (deltaY > 18 || deltaX > 20) {
@@ -275,7 +304,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   return (
     <div className="min-h-[100dvh] w-full bg-black text-white flex justify-center select-none">
       <div className="w-full max-w-[420px] min-h-[100dvh] flex flex-col justify-between px-4 pt-3 pb-6">
-        {/* TOP SECTION: Back Arrow + Mode Badge + 5 Opponents Row */}
+        {/* TOP SECTION: Back Arrow + Mode/Invite Badge + 5 Opponents Row */}
         <div>
           <div className="h-10 flex items-center justify-between mb-2">
             <button
@@ -287,17 +316,31 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               <ArrowLeft className="w-6 h-6 stroke-[2]" />
             </button>
 
-            <span
-              className={`text-[11px] px-2.5 py-1 rounded-full font-medium border ${
-                isRealFriendsRoom
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                  : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300'
-              }`}
-            >
-              {isRealFriendsRoom
-                ? `👥 Solo Reales · #${tableState.roomId}`
-                : '🤖 Práctica vs Bots'}
-            </span>
+            {isRealFriendsRoom ? (
+              <button
+                type="button"
+                onClick={handleShareRoomLink}
+                className="text-[11px] px-3 py-1 rounded-full font-medium border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+              >
+                {copiedRoomInvite ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>¡Link #{tableState.roomId} copiado!</span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      👥 Sala #{tableState.roomId} ({seatedCount}/6)
+                    </span>
+                    <Share2 className="w-3 h-3 opacity-80" />
+                  </>
+                )}
+              </button>
+            ) : (
+              <span className="text-[11px] px-2.5 py-1 rounded-full font-medium border bg-indigo-500/10 border-indigo-500/30 text-indigo-300">
+                🤖 Práctica vs Bots
+              </span>
+            )}
           </div>
 
           <TopOpponentsRow
@@ -332,8 +375,8 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
         {/* BOTTOM SECTION: Action Controls + Split 2-Column HUD */}
         <div className="flex flex-col gap-3.5">
-          {/* Hero's own current round bet badge above the left button (IMG_8411, IMG_8413) */}
-          <div className="h-[24px] flex items-center justify-between px-2">
+          {/* Hero's own current round bet badge + status indicator */}
+          <div className="min-h-[24px] flex items-center justify-between px-2">
             <div>
               {hero.currentBet > 0 && (
                 <div className="min-w-[24px] h-[24px] px-1.5 rounded-full bg-[#1a1b1f] text-[#eab308] text-[12px] font-semibold flex items-center justify-center">
@@ -342,13 +385,28 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               )}
             </div>
 
-            {/* In Real Friends Mode (sin bots), when waiting on a friend's seat, show clear status + pass turn helper */}
+            {isRealFriendsRoom && seatedCount < 2 && (
+              <div className="flex items-center gap-2 text-[11px] text-[#9ca3af]">
+                <span>Esperando amigos en #{tableState.roomId}...</span>
+                <button
+                  type="button"
+                  onClick={handleShareRoomLink}
+                  className="px-2.5 py-0.5 rounded-full bg-white text-black font-semibold cursor-pointer active:scale-95"
+                >
+                  {copiedRoomInvite ? '¡Copiado!' : 'Invitar amigo'}
+                </button>
+              </div>
+            )}
+
+            {/* In Real Friends Mode with 2+ players, when waiting on a friend's seat */}
             {isRealFriendsRoom &&
+              seatedCount >= 2 &&
               tableState.street !== 'showdown' &&
               currentActor &&
-              currentActor.id !== hero.id && (
+              currentActor.id !== hero.id &&
+              !isVacantSeat(currentActor) && (
                 <div className="flex items-center gap-2 text-[11px] text-[#9ca3af]">
-                  <span>Esperando a {currentActor.name}...</span>
+                  <span>Turno de {currentActor.name}...</span>
                   <button
                     type="button"
                     onClick={() =>
@@ -358,7 +416,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                     }
                     className="px-2 py-0.5 rounded-full bg-[#1f2128] border border-[#2e313b] text-white font-medium cursor-pointer active:scale-95"
                   >
-                    {friendToCall === 0 ? 'Check' : `Call ${friendToCall}`} ({currentActor.name})
+                    {friendToCall === 0 ? 'Check' : `Call ${friendToCall}`}
                   </button>
                   <button
                     type="button"
@@ -393,7 +451,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               </button>
             </div>
           ) : isSliderOpen ? (
-            /* CUSTOM RAISE SLIDER MODE (IMG_8409, IMG_8410) */
+            /* CUSTOM RAISE SLIDER MODE */
             <div className="flex flex-col gap-3">
               {/* Top slider row: ↑ <amount> | slider | white circle confirm ↑ */}
               <div className="flex items-center gap-4 px-1 h-[36px]">
@@ -461,7 +519,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               </div>
             </div>
           ) : (
-            /* DEFAULT ACTION MODE (IMG_8408, IMG_8411, IMG_8413) */
+            /* DEFAULT ACTION MODE */
             <div className="flex items-center gap-2.5 h-[50px]">
               <button
                 type="button"
@@ -535,8 +593,13 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                         {heroHandEval.categoryName}
                       </span>
 
-                      <div className="my-auto flex items-center justify-center">
-                        <Avatar3D avatarId={heroAvatarId} size={48} />
+                      <div className="my-auto relative flex items-center justify-center">
+                        <Avatar3D avatarId={profileState.avatarId} size={48} />
+                        {tableState.dealerIndex === resolvedHeroIndex && (
+                          <div className="absolute -bottom-0.5 -right-1 w-[16px] h-[16px] rounded-full bg-white text-black text-[10px] font-bold flex items-center justify-center shadow">
+                            D
+                          </div>
+                        )}
                       </div>
 
                       <AnimatedNumber
@@ -577,7 +640,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                 </AnimatePresence>
               </div>
 
-              {/* Tiny 2 vertical pagination dots on far right edge (IMG_8410) */}
+              {/* Tiny 2 vertical pagination dots on far right edge */}
               <div className="absolute -right-2.5 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 pointer-events-none">
                 <span
                   className={`w-1 h-1 rounded-full transition-colors ${

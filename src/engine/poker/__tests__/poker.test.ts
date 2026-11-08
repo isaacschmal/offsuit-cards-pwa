@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { Card, Rank, Suit } from '../../types';
 import { calculateHoldemEquity } from '../equity';
 import { evaluateHoldemHand } from '../evaluator';
-import { applyPlayerAction, createInitialTableState } from '../gameState';
+import {
+  applyPlayerAction,
+  createInitialTableState,
+  getSeatedPlayersCount,
+  seatPlayerInTable,
+} from '../gameState';
 
 function c(rank: Rank, suit: Suit): Card {
   return { id: `${rank}-${suit}`, rank, suit };
@@ -98,7 +103,6 @@ describe('Monte Carlo Equity Calculator', () => {
       5,
       800
     );
-    // Against 5 random hands preflop, 99 wins ~23-32% and most likely improvement is Two Pair (~35-44%)
     expect(result.winPct).toBeGreaterThanOrEqual(18);
     expect(result.winPct).toBeLessThanOrEqual(40);
     expect(result.nextHandLabel).toBe('Two Pair');
@@ -108,46 +112,91 @@ describe('Monte Carlo Equity Calculator', () => {
 });
 
 describe('Poker Table State Machine', () => {
-  it('initializes 6 players with Akash as dealer, Tori SB 1, Evelyn BB 2, Hero UTG with 9s 9h', () => {
-    const state = createInitialTableState();
+  it('names AI bots explicitly with "Bot" prefix and deals random hands by default', () => {
+    const state = createInitialTableState('BOTS', 'bots');
     expect(state.players).toHaveLength(6);
-    expect(state.players[state.dealerIndex].name).toBe('Akash');
-    expect(state.players[4].name).toBe('Tori');
+    expect(state.players[1].name).toBe('Bot Emma');
+    expect(state.players[2].name).toBe('Bot Leo');
+    expect(state.players[3].name).toBe('Bot Akash');
+    expect(state.players[4].name).toBe('Bot Tori');
+    expect(state.players[5].name).toBe('Bot Evelyn');
+
+    expect(state.players[state.dealerIndex].name).toBe('Bot Akash');
     expect(state.players[4].currentBet).toBe(1);
-    expect(state.players[5].name).toBe('Evelyn');
     expect(state.players[5].currentBet).toBe(2);
     expect(state.currentTurnIndex).toBe(0); // Hero UTG
     expect(state.collectedPot).toBe(0);
+
+    // Verify random dealing across multiple tables (not locked to 9s 9h)
+    const hands = new Set<string>();
+    for (let i = 0; i < 8; i++) {
+      const s = createInitialTableState('BOTS', 'bots');
+      hands.add(s.players[0].holeCards.map((card) => card.id).join(','));
+    }
+    expect(hands.size).toBeGreaterThan(1);
 
     // Hero calls 2
     const nextState = applyPlayerAction(state, 'hero', { type: 'call' });
     expect(nextState.players[0].currentBet).toBe(2);
     expect(nextState.players[0].stack).toBe(198);
-    expect(nextState.currentTurnIndex).toBe(1); // Emma's turn
+    expect(nextState.currentTurnIndex).toBe(1); // Bot Emma's turn
   });
 
   it('supports Hero Throw-to-Fold action and advances turn sequentially through opponents', () => {
-    let state = createInitialTableState('PRIMOS');
+    let state = createInitialTableState('BOTS', 'bots');
     expect(state.currentTurnIndex).toBe(0);
 
     // Hero throws cards to fold
     state = applyPlayerAction(state, 'hero', { type: 'fold' });
     expect(state.players[0].status).toBe('folded');
     expect(state.players[0].lastAction).toBe('Fold');
-    expect(state.currentTurnIndex).toBe(1); // Advances sequentially to Emma (seat 1)
+    expect(state.currentTurnIndex).toBe(1); // Advances sequentially to Bot Emma (seat 1)
 
-    // Emma raises to 6
+    // Bot Emma raises to 6
     state = applyPlayerAction(state, 'bot-emma', { type: 'raise', raiseToAmount: 6 });
-    expect(state.currentTurnIndex).toBe(2); // Advances to Leo (seat 2)
+    expect(state.currentTurnIndex).toBe(2); // Advances to Bot Leo (seat 2)
 
-    // Leo folds
+    // Bot Leo folds
     state = applyPlayerAction(state, 'bot-leo', { type: 'fold' });
-    expect(state.currentTurnIndex).toBe(3); // Advances to Akash (seat 3)
+    expect(state.currentTurnIndex).toBe(3); // Advances to Bot Akash (seat 3)
+  });
+
+  it('keeps real rooms free of fake bots and seats real joining friends dynamically', () => {
+    let realState = createInitialTableState('MESA1', 'real');
+    expect(realState.roomMode).toBe('real');
+    expect(getSeatedPlayersCount(realState.players)).toBe(1);
+    expect(realState.players.slice(1).every((p) => p.id.startsWith('empty-'))).toBe(true);
+    expect(realState.players.slice(1).every((p) => p.name === 'Esperando...')).toBe(true);
+
+    // Host claims seat 0
+    realState = seatPlayerInTable(realState, {
+      id: 'p_isaac',
+      name: 'Isaac',
+      avatarId: 'hero',
+    }).state;
+    expect(realState.players[0].id).toBe('p_isaac');
+    expect(realState.players[0].name).toBe('Isaac');
+    expect(getSeatedPlayersCount(realState.players)).toBe(1);
+
+    // Friend Leo joins the room on another phone -> takes seat 1 and starts the hand
+    const joined = seatPlayerInTable(realState, {
+      id: 'p_leo',
+      name: 'Leo',
+      avatarId: 'leo',
+    });
+    expect(joined.changed).toBe(true);
+    realState = joined.state;
+    expect(getSeatedPlayersCount(realState.players)).toBe(2);
+    expect(realState.players[1].id).toBe('p_leo');
+    expect(realState.players[1].name).toBe('Leo');
+    expect(realState.players[0].holeCards).toHaveLength(2);
+    expect(realState.players[1].holeCards).toHaveLength(2);
+    expect(realState.currentHighestBet).toBe(2);
   });
 });
 
 describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () => {
-  it('computes LAG, TAG, ROCK, and FISH archetypes accurately for the diamond radar chart', async () => {
+  it('starts with 0 XP, 0 stats, neutral radar (archetype=null) and computes LAG/TAG/ROCK/FISH after hands played', async () => {
     const {
       CARD_BACK_THEMES,
       DEFAULT_USER_PROFILE,
@@ -155,11 +204,32 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
       cycleCardBackColor,
     } = await import('../../../lib/profile');
 
-    // Default profile is calibrated to LAG (Loose-Aggressive) matching image_2.png
-    const defaultMetrics = computePlaystyleMetrics(DEFAULT_USER_PROFILE.stats);
-    expect(defaultMetrics.archetype).toBe('LAG');
-    expect(defaultMetrics.aggressive).toBeGreaterThan(defaultMetrics.passive);
-    expect(defaultMetrics.loose).toBeGreaterThan(defaultMetrics.tight);
+    expect(DEFAULT_USER_PROFILE.xp).toBe(0);
+    expect(DEFAULT_USER_PROFILE.level).toBe(1);
+    expect(DEFAULT_USER_PROFILE.hasSetCustomName).toBe(false);
+    expect(DEFAULT_USER_PROFILE.friends).toEqual([]);
+    expect(DEFAULT_USER_PROFILE.stats.handsPlayed).toBe(0);
+
+    // 0 hands played -> neutral small diamond with null archetype
+    const neutralMetrics = computePlaystyleMetrics(DEFAULT_USER_PROFILE.stats);
+    expect(neutralMetrics.archetype).toBeNull();
+    expect(neutralMetrics.aggressive).toBe(0.18);
+    expect(neutralMetrics.loose).toBe(0.18);
+    expect(neutralMetrics.passive).toBe(0.18);
+    expect(neutralMetrics.tight).toBe(0.18);
+
+    // Loose-Aggressive (LAG)
+    const lagMetrics = computePlaystyleMetrics({
+      handsPlayed: 28,
+      vpipCount: 19,
+      aggressiveCount: 24,
+      passiveCount: 11,
+      foldCount: 9,
+      handsWon: 12,
+    });
+    expect(lagMetrics.archetype).toBe('LAG');
+    expect(lagMetrics.aggressive).toBeGreaterThan(lagMetrics.passive);
+    expect(lagMetrics.loose).toBeGreaterThan(lagMetrics.tight);
 
     // Tight-Passive (ROCK)
     const rockMetrics = computePlaystyleMetrics({
@@ -193,25 +263,31 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
     expect(cycled.cardBackColor).toBe('indigo');
   });
 
-  it('strictly separates Real-Player rooms (isBot=false) from Bot Practice rooms (isBot=true)', async () => {
-    const { createNewOpenRoom, DEFAULT_OPEN_ROOMS } = await import('../../../lib/multiplayer');
+  it('starts with an empty open rooms directory and encodes/decodes MQTT WebSocket packets', async () => {
+    const {
+      DEFAULT_OPEN_ROOMS,
+      buildMqttPublishPacket,
+      createNewOpenRoom,
+      parseMqttPublishPackets,
+    } = await import('../../../lib/multiplayer');
 
-    const realState = createInitialTableState('PRIMOS', 'real');
-    expect(realState.roomMode).toBe('real');
-    expect(realState.players.slice(1).every((p) => p.isBot === false)).toBe(true);
-
-    const botState = createInitialTableState('BOTS', 'bots');
-    expect(botState.roomMode).toBe('bots');
-    expect(botState.players.slice(1).every((p) => p.isBot === true)).toBe(true);
-
-    expect(DEFAULT_OPEN_ROOMS.find((r) => r.code === 'PRIMOS')?.roomMode).toBe('real');
-    expect(DEFAULT_OPEN_ROOMS.find((r) => r.code === 'TURNOS')?.roomMode).toBe('real');
-    expect(DEFAULT_OPEN_ROOMS.find((r) => r.code === 'BOTS')?.roomMode).toBe('bots');
+    expect(DEFAULT_OPEN_ROOMS).toEqual([]);
 
     const customReal = createNewOpenRoom('Mesa Amigos', 'live', 'AMIGOS', 'real');
     expect(customReal.roomMode).toBe('real');
+    expect(customReal.playerCount).toBe(1);
+
+    const pkt = buildMqttPublishPacket(
+      'cartas/v5/room/AMIGOS/state',
+      JSON.stringify({ type: 'table_state', roomId: 'AMIGOS' }),
+      true
+    );
+    const decoded = parseMqttPublishPackets(pkt);
+    expect(decoded).toHaveLength(1);
+    expect(decoded[0].topic).toBe('cartas/v5/room/AMIGOS/state');
+    expect(JSON.parse(decoded[0].payload)).toEqual({
+      type: 'table_state',
+      roomId: 'AMIGOS',
+    });
   });
 });
-
-
-

@@ -14,7 +14,7 @@ export type RoomPlayersMode = 'real' | 'bots';
 export interface PokerTableState {
   roomId: string;
   roomMode?: RoomPlayersMode;
-  players: Player[]; // index 0 is local hero, 1..5 are top row left-to-right (Emma, Leo, Akash, Tori, Evelyn)
+  players: Player[]; // index 0 is host/hero, 1..5 are seats 1..5
   deck: Card[];
   communityCards: Card[]; // 0, 3, 4, or 5 revealed cards
   collectedPot: number; // Pot swept into center from completed streets (shown below 5th community card)
@@ -39,18 +39,27 @@ export interface PlayerActionInput {
 }
 
 export const DEFAULT_OPPONENTS = [
-  { id: 'bot-emma', name: 'Emma', avatarId: 'emma' },
-  { id: 'bot-leo', name: 'Leo', avatarId: 'leo' },
-  { id: 'bot-akash', name: 'Akash', avatarId: 'akash' },
-  { id: 'bot-tori', name: 'Tori', avatarId: 'tori' },
-  { id: 'bot-evelyn', name: 'Evelyn', avatarId: 'evelyn' },
+  { id: 'bot-emma', name: 'Bot Emma', avatarId: 'emma' },
+  { id: 'bot-leo', name: 'Bot Leo', avatarId: 'leo' },
+  { id: 'bot-akash', name: 'Bot Akash', avatarId: 'akash' },
+  { id: 'bot-tori', name: 'Bot Tori', avatarId: 'tori' },
+  { id: 'bot-evelyn', name: 'Bot Evelyn', avatarId: 'evelyn' },
 ];
+
+export function isVacantSeat(player: Player): boolean {
+  return player.id.startsWith('empty-');
+}
+
+export function getSeatedPlayersCount(players: Player[]): number {
+  return players.filter((p) => !isVacantSeat(p)).length;
+}
 
 export function createInitialTableState(
   roomId = 'local-offsuit',
-  roomMode: RoomPlayersMode = 'bots'
+  roomMode: RoomPlayersMode = 'bots',
+  useOpeningSeed = false
 ): PokerTableState {
-  const isBotSeat = roomMode === 'bots';
+  const isBotMode = roomMode === 'bots';
   const players: Player[] = [
     {
       id: 'hero',
@@ -65,19 +74,35 @@ export function createInitialTableState(
       isBot: false,
       seatIndex: 0,
     },
-    ...DEFAULT_OPPONENTS.map((opp, idx) => ({
-      id: opp.id,
-      name: opp.name,
-      avatarId: opp.avatarId,
-      stack: 200,
-      currentBet: 0,
-      totalHandBet: 0,
-      holeCards: [],
-      status: 'active' as const,
-      lastAction: null,
-      isBot: isBotSeat,
-      seatIndex: idx + 1,
-    })),
+    ...DEFAULT_OPPONENTS.map((opp, idx) =>
+      isBotMode
+        ? {
+            id: opp.id,
+            name: opp.name,
+            avatarId: opp.avatarId,
+            stack: 200,
+            currentBet: 0,
+            totalHandBet: 0,
+            holeCards: [],
+            status: 'active' as const,
+            lastAction: null,
+            isBot: true,
+            seatIndex: idx + 1,
+          }
+        : {
+            id: `empty-${idx + 1}`,
+            name: 'Esperando...',
+            avatarId: 'empty',
+            stack: 0,
+            currentBet: 0,
+            totalHandBet: 0,
+            holeCards: [],
+            status: 'out' as const,
+            lastAction: null,
+            isBot: false,
+            seatIndex: idx + 1,
+          }
+    ),
   ];
 
   const baseState: PokerTableState = {
@@ -88,7 +113,7 @@ export function createInitialTableState(
     communityCards: [],
     collectedPot: 0,
     sidePots: [],
-    dealerIndex: 2, // So startNewHand advances dealerIndex to 3 (Akash), matching IMG_8408!
+    dealerIndex: 2, // In 6-max bot mode advances to 3 (Bot Akash)
     currentTurnIndex: 0,
     street: 'preflop',
     smallBlind: 1,
@@ -102,14 +127,130 @@ export function createInitialTableState(
     handNumber: 0,
   };
 
-  return startNewHand(baseState, true);
+  return startNewHand(baseState, useOpeningSeed);
+}
+
+/**
+ * Seats a real human player into the table (either claiming seat 0 or taking the next vacant seat)
+ * and starts a hand when the second player joins.
+ */
+export function seatPlayerInTable(
+  state: PokerTableState,
+  participant: { id: string; name: string; avatarId: string }
+): { state: PokerTableState; changed: boolean } {
+  if (!participant.id) return { state, changed: false };
+  const cleanName = participant.name.trim() || 'Jugador';
+  const cleanAvatar = participant.avatarId || 'hero';
+
+  // In bots mode, just keep seat 0 updated with local player's identity
+  if (state.roomMode === 'bots') {
+    const heroSeat = state.players[0];
+    if (
+      heroSeat &&
+      (heroSeat.name !== cleanName || heroSeat.avatarId !== cleanAvatar)
+    ) {
+      const updatedPlayers = [...state.players];
+      updatedPlayers[0] = {
+        ...heroSeat,
+        name: cleanName,
+        avatarId: cleanAvatar,
+      };
+      return {
+        state: { ...state, players: updatedPlayers },
+        changed: true,
+      };
+    }
+    return { state, changed: false };
+  }
+
+  // Check if player is already seated
+  const existingIdx = state.players.findIndex((p) => p.id === participant.id);
+  if (existingIdx >= 0) {
+    const existing = state.players[existingIdx];
+    if (existing.name !== cleanName || existing.avatarId !== cleanAvatar) {
+      const updatedPlayers = [...state.players];
+      updatedPlayers[existingIdx] = {
+        ...existing,
+        name: cleanName,
+        avatarId: cleanAvatar,
+      };
+      return {
+        state: { ...state, players: updatedPlayers },
+        changed: true,
+      };
+    }
+    return { state, changed: false };
+  }
+
+  // If seat 0 is still the unclaimed default 'hero' placeholder, claim seat 0
+  if (state.players[0]?.id === 'hero') {
+    const updatedPlayers = [...state.players];
+    updatedPlayers[0] = {
+      ...updatedPlayers[0],
+      id: participant.id,
+      name: cleanName,
+      avatarId: cleanAvatar,
+    };
+    return {
+      state: { ...state, players: updatedPlayers },
+      changed: true,
+    };
+  }
+
+  // Find first vacant seat ('empty-1' .. 'empty-5')
+  const emptyIdx = state.players.findIndex((p) => isVacantSeat(p));
+  if (emptyIdx === -1) {
+    return { state, changed: false };
+  }
+
+  const prevSeatedCount = getSeatedPlayersCount(state.players);
+  const updatedPlayers = [...state.players];
+  updatedPlayers[emptyIdx] = {
+    id: participant.id,
+    name: cleanName,
+    avatarId: cleanAvatar,
+    stack: 200,
+    currentBet: 0,
+    totalHandBet: 0,
+    holeCards: [],
+    status: 'active',
+    lastAction: null,
+    isBot: false,
+    seatIndex: emptyIdx,
+  };
+
+  // If table was waiting for a 2nd player, or is preflop with 0 actions taken yet, deal a fresh hand for everyone
+  if (
+    prevSeatedCount < 2 ||
+    (state.street === 'preflop' && state.actedPlayerIds.length === 0)
+  ) {
+    const nextState = startNewHand(
+      {
+        ...state,
+        players: updatedPlayers,
+        handNumber: Math.max(0, state.handNumber - 1),
+      },
+      false
+    );
+    return { state: nextState, changed: true };
+  }
+
+  // Otherwise seat them folded for the current hand so they get dealt in on the next hand
+  updatedPlayers[emptyIdx] = {
+    ...updatedPlayers[emptyIdx],
+    status: 'folded',
+  };
+  return {
+    state: { ...state, players: updatedPlayers },
+    changed: true,
+  };
 }
 
 function findNextActiveIndex(players: Player[], fromIndex: number): number {
   const n = players.length;
   for (let offset = 1; offset <= n; offset++) {
     const idx = (fromIndex + offset) % n;
-    if (players[idx].status === 'active') {
+    if (players[idx].status === 'active' && !isVacantSeat(players[idx])) {
       return idx;
     }
   }
@@ -120,7 +261,11 @@ function findNextNonOutIndex(players: Player[], fromIndex: number): number {
   const n = players.length;
   for (let offset = 1; offset <= n; offset++) {
     const idx = (fromIndex + offset) % n;
-    if (players[idx].status !== 'out' && players[idx].stack > 0) {
+    if (
+      !isVacantSeat(players[idx]) &&
+      players[idx].status !== 'out' &&
+      players[idx].stack > 0
+    ) {
       return idx;
     }
   }
@@ -131,44 +276,53 @@ export function startNewHand(
   prevState: PokerTableState,
   useOpeningSeed = false
 ): PokerTableState {
-  // Replenish busted players so game never deadlocks
-  const refreshedPlayers: Player[] = prevState.players.map((p) => ({
-    ...p,
-    stack: p.stack <= 0 ? 200 : p.stack,
-    currentBet: 0,
-    totalHandBet: 0,
-    holeCards: [] as Card[],
-    status: 'active',
-    lastAction: null,
-  }));
+  // Replenish busted seated players; keep vacant seats ('empty-*') as 'out'
+  const refreshedPlayers: Player[] = prevState.players.map((p) => {
+    if (isVacantSeat(p)) {
+      return {
+        ...p,
+        stack: 0,
+        currentBet: 0,
+        totalHandBet: 0,
+        holeCards: [] as Card[],
+        status: 'out' as const,
+        lastAction: null,
+      };
+    }
+    return {
+      ...p,
+      stack: p.stack <= 0 ? 200 : p.stack,
+      currentBet: 0,
+      totalHandBet: 0,
+      holeCards: [] as Card[],
+      status: 'active' as const,
+      lastAction: null,
+    };
+  });
 
-  const dealerIndex = findNextNonOutIndex(refreshedPlayers, prevState.dealerIndex);
-  const sbIndex = findNextNonOutIndex(refreshedPlayers, dealerIndex);
-  const bbIndex = findNextNonOutIndex(refreshedPlayers, sbIndex);
-  const utgIndex = findNextNonOutIndex(refreshedPlayers, bbIndex);
+  const seatedCount = getSeatedPlayersCount(refreshedPlayers);
 
   let deck = shuffleDeck(createStandardDeck());
 
   if (useOpeningSeed) {
-    // Seed the opening hand so Hero gets 9♠ 9♥ and board has J♥ K♥ 6♥ 7♦ on top of deck,
-    // matching the exact Offsuit reference screenshots (IMG_8408 - IMG_8413)
+    // Optional deterministic seed for unit tests only
     const pinnedIds = [
       '9-spades',
-      '9-hearts', // Hero hole cards
+      '9-hearts',
       '14-diamonds',
-      '13-spades', // Emma hole cards (strong hand so she raises like IMG_8411)
+      '13-spades',
       '7-clubs',
-      '2-diamonds', // Leo
+      '2-diamonds',
       '10-clubs',
-      '4-spades', // Akash
+      '4-spades',
       '8-diamonds',
-      '5-clubs', // Tori
+      '5-clubs',
       '12-clubs',
-      '6-spades', // Evelyn
-      '11-hearts', // Flop 1: J♥
-      '13-hearts', // Flop 2: K♥
-      '6-hearts', // Flop 3: 6♥
-      '7-diamonds', // Turn: 7♦
+      '6-spades',
+      '11-hearts',
+      '13-hearts',
+      '6-hearts',
+      '7-diamonds',
     ];
     const cardMap = new Map(deck.map((c) => [c.id, c]));
     const pinnedCards = pinnedIds.map((id) => cardMap.get(id)!).filter(Boolean);
@@ -178,6 +332,12 @@ export function startNewHand(
 
   let deckCursor = 0;
   const playersWithCards = refreshedPlayers.map((p) => {
+    if (isVacantSeat(p) || p.status === 'out') {
+      return {
+        ...p,
+        holeCards: [] as Card[],
+      };
+    }
     const holeCards = [deck[deckCursor], deck[deckCursor + 1]];
     deckCursor += 2;
     return {
@@ -185,6 +345,40 @@ export function startNewHand(
       holeCards,
     };
   });
+
+  // If fewer than 2 players are seated (e.g., real room waiting for friends to join), wait without posting blinds
+  if (seatedCount < 2) {
+    const loneIdx = Math.max(
+      0,
+      playersWithCards.findIndex((p) => !isVacantSeat(p))
+    );
+    return {
+      ...prevState,
+      players: playersWithCards,
+      deck: deck.slice(deckCursor),
+      communityCards: [],
+      collectedPot: 0,
+      sidePots: [],
+      dealerIndex: loneIdx,
+      currentTurnIndex: loneIdx,
+      street: 'preflop',
+      currentHighestBet: 0,
+      minRaiseTo: prevState.bigBlind,
+      lastRaiseIncrement: prevState.bigBlind,
+      actedPlayerIds: [],
+      winnerIds: [],
+      winningHandName: null,
+      handNumber: prevState.handNumber + 1,
+    };
+  }
+
+  const dealerIndex = findNextNonOutIndex(playersWithCards, prevState.dealerIndex);
+  const sbIndex =
+    seatedCount === 2
+      ? dealerIndex
+      : findNextNonOutIndex(playersWithCards, dealerIndex);
+  const bbIndex = findNextNonOutIndex(playersWithCards, sbIndex);
+  const utgIndex = findNextNonOutIndex(playersWithCards, bbIndex);
 
   // Post Small Blind and Big Blind
   const sbPlayer = playersWithCards[sbIndex];
@@ -233,7 +427,7 @@ export function getTotalPot(state: PokerTableState): number {
 }
 
 export function computeSidePots(players: Player[]): SidePot[] {
-  const contributors = players.filter((p) => p.totalHandBet > 0);
+  const contributors = players.filter((p) => p.totalHandBet > 0 && !isVacantSeat(p));
   if (contributors.length === 0) return [];
 
   const levels = Array.from(new Set(contributors.map((p) => p.totalHandBet))).sort(
@@ -250,7 +444,7 @@ export function computeSidePots(players: Player[]): SidePot[] {
     const involved = contributors.filter((p) => p.totalHandBet >= level);
     const amount = slice * involved.length;
     const eligiblePlayerIds = involved
-      .filter((p) => p.status !== 'folded')
+      .filter((p) => p.status !== 'folded' && p.status !== 'out')
       .map((p) => p.id);
 
     pots.push({ amount, eligiblePlayerIds });
@@ -269,7 +463,9 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
     currentBet: 0,
   }));
 
-  const contenders = playersClearedBets.filter((p) => p.status !== 'folded');
+  const contenders = playersClearedBets.filter(
+    (p) => !isVacantSeat(p) && p.status !== 'folded' && p.status !== 'out'
+  );
 
   if (contenders.length === 1) {
     const soleWinner = contenders[0];
@@ -355,7 +551,9 @@ function advanceStreetOrShowdown(state: PokerTableState): PokerTableState {
     lastAction: p.status === 'folded' ? ('Fold' as const) : null,
   }));
 
-  const nonFolded = resetPlayers.filter((p) => p.status !== 'folded');
+  const nonFolded = resetPlayers.filter(
+    (p) => !isVacantSeat(p) && p.status !== 'folded' && p.status !== 'out'
+  );
   if (nonFolded.length <= 1) {
     return resolveShowdown({
       ...state,
@@ -364,7 +562,9 @@ function advanceStreetOrShowdown(state: PokerTableState): PokerTableState {
     });
   }
 
-  const activeCanAct = resetPlayers.filter((p) => p.status === 'active');
+  const activeCanAct = resetPlayers.filter(
+    (p) => !isVacantSeat(p) && p.status === 'active'
+  );
 
   let nextStreet: Street = 'showdown';
   let newCommunity = [...state.communityCards];
@@ -436,6 +636,7 @@ export function applyPlayerAction(
   action: PlayerActionInput
 ): PokerTableState {
   if (state.street === 'showdown') return state;
+  if (getSeatedPlayersCount(state.players) < 2) return state;
 
   const playerIdx = state.players.findIndex((p) => p.id === playerId);
   if (playerIdx === -1 || playerIdx !== state.currentTurnIndex) {
@@ -443,7 +644,7 @@ export function applyPlayerAction(
   }
 
   const player = state.players[playerIdx];
-  if (player.status !== 'active') return state;
+  if (player.status !== 'active' || isVacantSeat(player)) return state;
 
   const updatedPlayers = [...state.players];
   let currentHighestBet = state.currentHighestBet;
@@ -516,8 +717,10 @@ export function applyPlayerAction(
     };
   }
 
-  // Check if all other players folded
-  const remainingNonFolded = updatedPlayers.filter((p) => p.status !== 'folded');
+  // Check if all other seated players folded
+  const remainingNonFolded = updatedPlayers.filter(
+    (p) => !isVacantSeat(p) && p.status !== 'folded' && p.status !== 'out'
+  );
   if (remainingNonFolded.length <= 1) {
     return advanceStreetOrShowdown({
       ...state,
@@ -530,8 +733,10 @@ export function applyPlayerAction(
   }
 
   // Check if the betting round is complete:
-  // Every active player has acted AND matches currentHighestBet
-  const activePlayers = updatedPlayers.filter((p) => p.status === 'active');
+  // Every active seated player has acted AND matches currentHighestBet
+  const activePlayers = updatedPlayers.filter(
+    (p) => !isVacantSeat(p) && p.status === 'active'
+  );
   const allActiveActedAndMatched = activePlayers.every(
     (p) => actedPlayerIds.includes(p.id) && p.currentBet === currentHighestBet
   );
@@ -561,7 +766,7 @@ export function applyPlayerAction(
 }
 
 /**
- * Simple & natural AI bot decision maker for solo / practice mode.
+ * Natural AI bot decision maker for solo / practice mode against bots.
  */
 export function getBotDecision(state: PokerTableState, botId: string): PlayerActionInput {
   const bot = state.players.find((p) => p.id === botId);
@@ -569,16 +774,6 @@ export function getBotDecision(state: PokerTableState, botId: string): PlayerAct
 
   const toCall = Math.max(0, state.currentHighestBet - bot.currentBet);
   const evalHand = evaluateHoldemHand([...bot.holeCards, ...state.communityCards]);
-
-  // First hand scripted behavior for Emma & others to mirror IMG_8411 if Hero calls 2 preflop
-  if (state.handNumber === 1 && state.street === 'preflop') {
-    if (bot.name === 'Emma' && state.currentHighestBet <= 2) {
-      return { type: 'raise', raiseToAmount: 6 };
-    }
-    if (bot.name === 'Leo' || bot.name === 'Akash') {
-      return { type: 'fold' };
-    }
-  }
 
   if (toCall === 0) {
     // Can check or bet

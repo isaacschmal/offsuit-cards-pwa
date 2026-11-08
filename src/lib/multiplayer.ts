@@ -1,9 +1,12 @@
 import {
   createInitialTableState,
+  getSeatedPlayersCount,
   getTotalPot,
   type PokerTableState,
   type RoomPlayersMode,
+  seatPlayerInTable,
 } from '../engine/poker/gameState';
+import { loadUserProfile } from './profile';
 import { supabase } from './supabase';
 
 export type RoomPacingMode = 'live' | 'async';
@@ -22,8 +25,8 @@ export interface OpenRoomInfo {
   updatedAt: number;
 }
 
-const ROOMS_STORAGE_KEY = 'cartas_open_rooms_directory_v3';
-const ROOM_STATE_PREFIX = 'cartas_room_state_v3_';
+export const ROOMS_STORAGE_KEY = 'cartas_open_rooms_directory_v5';
+const ROOM_STATE_PREFIX = 'cartas_room_state_v5_';
 
 const partykitHost = import.meta.env.VITE_PARTYKIT_HOST as string | undefined;
 export const isPartyKitConfigured = Boolean(partykitHost && partykitHost.trim().length > 0);
@@ -39,44 +42,249 @@ export function getPartyKitWebSocketUrl(roomId: string): string | null {
   return `${protocol}://${cleanHost}/party/${encodeURIComponent(roomId)}`;
 }
 
-export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [
-  {
-    code: 'PRIMOS',
-    name: 'Mesa de los Primos',
-    pacingMode: 'live',
-    roomMode: 'real',
-    playerCount: 5,
-    maxPlayers: 6,
-    blindsLabel: '1/2',
-    turnTimerSeconds: 20,
-    currentTurnPlayerName: 'Tú',
-    updatedAt: Date.now() - 45_000,
-  },
-  {
-    code: 'TURNOS',
-    name: 'Ajedrez de Cartas (Por Turnos)',
-    pacingMode: 'async',
-    roomMode: 'real',
-    playerCount: 4,
-    maxPlayers: 6,
-    blindsLabel: '1/2',
-    turnTimerSeconds: null,
-    currentTurnPlayerName: 'primo_leo',
-    updatedAt: Date.now() - 120_000,
-  },
-  {
-    code: 'BOTS',
-    name: 'Práctica vs Bots (IA)',
-    pacingMode: 'live',
-    roomMode: 'bots',
-    playerCount: 6,
-    maxPlayers: 6,
-    blindsLabel: '1/2',
-    turnTimerSeconds: 20,
-    currentTurnPlayerName: '5 Bots IA',
-    updatedAt: Date.now() - 220_000,
-  },
+/**
+ * Lightweight zero-dependency MQTT v3.1.1 over WebSockets client (`wss://broker.emqx.io:8084/mqtt`)
+ * for instant cross-device room discovery and live table sync without backend setup.
+ */
+const MQTT_BROKER_URLS = [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
 ];
+
+const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder();
+
+function encodeMqttVarLength(len: number): number[] {
+  const bytes: number[] = [];
+  let rem = len;
+  do {
+    let encodedByte = rem % 128;
+    rem = Math.floor(rem / 128);
+    if (rem > 0) encodedByte |= 128;
+    bytes.push(encodedByte);
+  } while (rem > 0);
+  return bytes;
+}
+
+function encodeMqttUtf8(str: string): Uint8Array {
+  const utf8 = utf8Encoder.encode(str);
+  const out = new Uint8Array(2 + utf8.length);
+  out[0] = (utf8.length >> 8) & 0xff;
+  out[1] = utf8.length & 0xff;
+  out.set(utf8, 2);
+  return out;
+}
+
+export function buildMqttConnectPacket(clientId: string): Uint8Array<ArrayBuffer> {
+  const protoName = encodeMqttUtf8('MQTT');
+  const varHeader = new Uint8Array([
+    ...protoName,
+    0x04, // Protocol level 4 (MQTT 3.1.1)
+    0x02, // Clean Session = 1
+    0x00,
+    0x3c, // Keep Alive = 60s
+  ]);
+  const payload = encodeMqttUtf8(clientId);
+  const remLen = encodeMqttVarLength(varHeader.length + payload.length);
+  const pkt = new Uint8Array(1 + remLen.length + varHeader.length + payload.length);
+  pkt[0] = 0x10; // CONNECT
+  pkt.set(remLen, 1);
+  pkt.set(varHeader, 1 + remLen.length);
+  pkt.set(payload, 1 + remLen.length + varHeader.length);
+  return pkt;
+}
+
+export function buildMqttSubscribePacket(
+  topic: string,
+  packetId = 1
+): Uint8Array<ArrayBuffer> {
+  const topicBytes = encodeMqttUtf8(topic);
+  const varHeader = new Uint8Array([(packetId >> 8) & 0xff, packetId & 0xff]);
+  const remLen = encodeMqttVarLength(varHeader.length + topicBytes.length + 1);
+  const pkt = new Uint8Array(1 + remLen.length + varHeader.length + topicBytes.length + 1);
+  pkt[0] = 0x82; // SUBSCRIBE (QoS 1 header flag)
+  pkt.set(remLen, 1);
+  pkt.set(varHeader, 1 + remLen.length);
+  pkt.set(topicBytes, 1 + remLen.length + varHeader.length);
+  pkt[pkt.length - 1] = 0x00; // Requested QoS 0
+  return pkt;
+}
+
+export function buildMqttPublishPacket(
+  topic: string,
+  message: string,
+  retain = false
+): Uint8Array<ArrayBuffer> {
+  const topicBytes = encodeMqttUtf8(topic);
+  const payloadBytes = utf8Encoder.encode(message);
+  const remLen = encodeMqttVarLength(topicBytes.length + payloadBytes.length);
+  const pkt = new Uint8Array(1 + remLen.length + topicBytes.length + payloadBytes.length);
+  pkt[0] = retain ? 0x31 : 0x30; // PUBLISH QoS 0, optional retain
+  pkt.set(remLen, 1);
+  pkt.set(topicBytes, 1 + remLen.length);
+  pkt.set(payloadBytes, 1 + remLen.length + topicBytes.length);
+  return pkt;
+}
+
+export function parseMqttPublishPackets(
+  buffer: Uint8Array
+): Array<{ topic: string; payload: string }> {
+  const results: Array<{ topic: string; payload: string }> = [];
+  let offset = 0;
+
+  while (offset < buffer.length) {
+    const header = buffer[offset];
+    const packetType = (header >> 4) & 0x0f;
+    const qos = (header >> 1) & 0x03;
+
+    let multiplier = 1;
+    let remainingLength = 0;
+    let idx = offset + 1;
+
+    while (idx < buffer.length) {
+      const encodedByte = buffer[idx];
+      remainingLength += (encodedByte & 127) * multiplier;
+      idx++;
+      if ((encodedByte & 128) === 0) break;
+      multiplier *= 128;
+    }
+
+    const packetEnd = idx + remainingLength;
+    if (packetEnd > buffer.length) break;
+
+    if (packetType === 3 && remainingLength >= 2) {
+      const topicLen = (buffer[idx] << 8) | buffer[idx + 1];
+      const topicStart = idx + 2;
+      const topicEnd = topicStart + topicLen;
+      if (topicEnd <= packetEnd) {
+        const topic = utf8Decoder.decode(buffer.subarray(topicStart, topicEnd));
+        const payloadStart = topicEnd + (qos > 0 ? 2 : 0);
+        if (payloadStart <= packetEnd) {
+          const payload = utf8Decoder.decode(buffer.subarray(payloadStart, packetEnd));
+          results.push({ topic, payload });
+        }
+      }
+    }
+
+    offset = packetEnd;
+  }
+
+  return results;
+}
+
+export interface MqttSubscriptionHandle {
+  publish: (topic: string, data: unknown, retain?: boolean) => void;
+  close: () => void;
+}
+
+export function connectMqttTopics(
+  topics: string[],
+  onMessage: (topic: string, data: unknown) => void
+): MqttSubscriptionHandle {
+  if (typeof WebSocket === 'undefined') {
+    return { publish: () => {}, close: () => {} };
+  }
+
+  let ws: WebSocket | null = null;
+  let isReady = false;
+  let closed = false;
+  let pingTimer: ReturnType<typeof setInterval> | null = null;
+  const pendingPublishes: Array<{ topic: string; json: string; retain: boolean }> = [];
+  const clientId = `cartas_${Math.random().toString(36).slice(2, 10)}`;
+
+  const connectToBroker = (brokerIndex: number) => {
+    if (closed || brokerIndex >= MQTT_BROKER_URLS.length) return;
+    try {
+      const socket = new WebSocket(MQTT_BROKER_URLS[brokerIndex], 'mqtt');
+      socket.binaryType = 'arraybuffer';
+      ws = socket;
+
+      socket.onopen = () => {
+        if (closed) {
+          socket.close();
+          return;
+        }
+        socket.send(buildMqttConnectPacket(clientId));
+      };
+
+      socket.onmessage = (ev) => {
+        if (!(ev.data instanceof ArrayBuffer)) return;
+        const bytes = new Uint8Array(ev.data);
+        if (bytes.length === 0) return;
+
+        const packetType = (bytes[0] >> 4) & 0x0f;
+        // CONNACK = 2
+        if (packetType === 2 && !isReady) {
+          isReady = true;
+          topics.forEach((t, i) => {
+            socket.send(buildMqttSubscribePacket(t, i + 1));
+          });
+          while (pendingPublishes.length > 0) {
+            const item = pendingPublishes.shift()!;
+            socket.send(buildMqttPublishPacket(item.topic, item.json, item.retain));
+          }
+          pingTimer = setInterval(() => {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(new Uint8Array([0xc0, 0x00])); // PINGREQ
+            }
+          }, 25_000);
+          return;
+        }
+
+        const published = parseMqttPublishPackets(bytes);
+        for (const msg of published) {
+          try {
+            const parsed = JSON.parse(msg.payload);
+            onMessage(msg.topic, parsed);
+          } catch {
+            // ignore non-JSON
+          }
+        }
+      };
+
+      socket.onerror = () => {
+        if (!isReady && !closed) {
+          try {
+            socket.close();
+          } catch {
+            // ignore
+          }
+          connectToBroker(brokerIndex + 1);
+        }
+      };
+    } catch {
+      connectToBroker(brokerIndex + 1);
+    }
+  };
+
+  connectToBroker(0);
+
+  return {
+    publish: (topic: string, data: unknown, retain = false) => {
+      const json = JSON.stringify(data);
+      if (ws && ws.readyState === WebSocket.OPEN && isReady) {
+        try {
+          ws.send(buildMqttPublishPacket(topic, json, retain));
+        } catch {
+          // ignore send errors
+        }
+      } else if (!closed) {
+        pendingPublishes.push({ topic, json, retain });
+      }
+    },
+    close: () => {
+      closed = true;
+      if (pingTimer) clearInterval(pingTimer);
+      try {
+        ws?.close();
+      } catch {
+        // ignore
+      }
+    },
+  };
+}
+
+export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [];
 
 export function loadOpenRooms(): OpenRoomInfo[] {
   if (typeof window === 'undefined' || !window.localStorage) {
@@ -85,11 +293,10 @@ export function loadOpenRooms(): OpenRoomInfo[] {
   try {
     const raw = window.localStorage.getItem(ROOMS_STORAGE_KEY);
     if (!raw) {
-      window.localStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(DEFAULT_OPEN_ROOMS));
       return DEFAULT_OPEN_ROOMS;
     }
     const parsed = JSON.parse(raw) as OpenRoomInfo[];
-    if (!Array.isArray(parsed) || parsed.length === 0) {
+    if (!Array.isArray(parsed)) {
       return DEFAULT_OPEN_ROOMS;
     }
     return parsed.map((r) => ({
@@ -108,6 +315,25 @@ export function saveOpenRooms(rooms: OpenRoomInfo[]): void {
   } catch {
     // ignore storage quota errors
   }
+}
+
+export function mergeOpenRoomsList(
+  localRooms: OpenRoomInfo[],
+  incomingRooms: OpenRoomInfo[]
+): OpenRoomInfo[] {
+  const map = new Map<string, OpenRoomInfo>();
+  for (const r of localRooms) {
+    map.set(r.code.toUpperCase(), r);
+  }
+  for (const inc of incomingRooms) {
+    if (!inc?.code) continue;
+    const key = inc.code.toUpperCase();
+    const existing = map.get(key);
+    if (!existing || (inc.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
+      map.set(key, { ...inc, code: key });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export function upsertOpenRoom(room: OpenRoomInfo): OpenRoomInfo[] {
@@ -140,6 +366,7 @@ export function createNewOpenRoom(
     generated += chars[Math.floor(Math.random() * chars.length)];
   }
   const code = (customCode?.trim() || generated).toUpperCase();
+  const profile = loadUserProfile();
 
   const newRoom: OpenRoomInfo = {
     code,
@@ -150,7 +377,7 @@ export function createNewOpenRoom(
     maxPlayers: 6,
     blindsLabel: '1/2',
     turnTimerSeconds: pacingMode === 'live' ? 20 : null,
-    currentTurnPlayerName: 'Tú',
+    currentTurnPlayerName: profile.name || 'Jugador',
     updatedAt: Date.now(),
   };
 
@@ -177,19 +404,21 @@ export function savePersistedRoomState(roomCode: string, state: PokerTableState)
     const key = `${ROOM_STATE_PREFIX}${normalized}`;
     window.localStorage.setItem(key, JSON.stringify(state));
 
-    // Also update the room's currentTurnPlayerName in the directory
+    // Also update the room's currentTurnPlayerName and real playerCount in the directory
     const rooms = loadOpenRooms();
     const found = rooms.find((r) => r.code === normalized);
     if (found) {
       const currentActor = state.players[state.currentTurnIndex];
+      const seatedCount = getSeatedPlayersCount(state.players);
       const turnLabel =
         state.street === 'showdown'
           ? 'Showdown'
-          : currentActor?.id === 'hero'
-          ? '¡Tu turno!'
+          : seatedCount < 2
+          ? 'Esperando jugadores...'
           : currentActor?.name ?? 'En juego';
       upsertOpenRoom({
         ...found,
+        playerCount: state.roomMode === 'bots' ? 6 : Math.max(1, seatedCount),
         currentTurnPlayerName: turnLabel,
       });
     }
@@ -203,23 +432,36 @@ export function getOrInitRoomState(
   roomMode: RoomPlayersMode = 'real'
 ): PokerTableState {
   const normalized = roomCode.trim().toUpperCase();
+  const profile = loadUserProfile();
   const saved = loadPersistedRoomState(normalized);
-  if (saved && Array.isArray(saved.players) && saved.players.length === 6) {
-    // Ensure saved state's player bot flags match the roomMode
-    const shouldBeBot = roomMode === 'bots';
-    const syncedPlayers = saved.players.map((p, idx) =>
-      idx === 0 ? p : { ...p, isBot: shouldBeBot }
-    );
-    return {
-      ...saved,
-      roomMode,
-      players: syncedPlayers,
-    };
+
+  if (
+    saved &&
+    Array.isArray(saved.players) &&
+    saved.players.length === 6 &&
+    saved.roomMode === roomMode
+  ) {
+    const { state: withLocalPlayer } = seatPlayerInTable(saved, {
+      id: profile.playerId,
+      name: profile.name || 'Jugador',
+      avatarId: profile.avatarId,
+    });
+    savePersistedRoomState(normalized, withLocalPlayer);
+    return withLocalPlayer;
   }
-  const fresh = createInitialTableState(normalized, roomMode);
-  savePersistedRoomState(normalized, fresh);
-  return fresh;
+
+  const fresh = createInitialTableState(normalized, roomMode, false);
+  const { state: seatedFresh } = seatPlayerInTable(fresh, {
+    id: profile.playerId,
+    name: profile.name || 'Jugador',
+    avatarId: profile.avatarId,
+  });
+  savePersistedRoomState(normalized, seatedFresh);
+  return seatedFresh;
 }
+
+const LOBBY_MQTT_TOPIC = 'cartas/v5/lobby/directory';
+let sharedLobbyMqtt: MqttSubscriptionHandle | null = null;
 
 function broadcastDirectoryUpdate(rooms: OpenRoomInfo[]): void {
   if (typeof BroadcastChannel !== 'undefined') {
@@ -231,6 +473,8 @@ function broadcastDirectoryUpdate(rooms: OpenRoomInfo[]): void {
       // ignore
     }
   }
+
+  sharedLobbyMqtt?.publish(LOBBY_MQTT_TOPIC, { type: 'directory_sync', rooms }, true);
 
   // PartyKit Cloudflare zero-cost WebSocket directory broadcast
   const wsUrl = getPartyKitWebSocketUrl('lobby');
@@ -271,11 +515,22 @@ export function subscribeToOpenRoomsDirectory(
   if (bc) {
     bc.onmessage = (ev) => {
       if (ev.data?.type === 'directory_sync' && Array.isArray(ev.data.rooms)) {
-        saveOpenRooms(ev.data.rooms);
-        onRoomsUpdated(ev.data.rooms);
+        const merged = mergeOpenRoomsList(loadOpenRooms(), ev.data.rooms);
+        saveOpenRooms(merged);
+        onRoomsUpdated(merged);
       }
     };
   }
+
+  const mqttHandle = connectMqttTopics([LOBBY_MQTT_TOPIC], (_topic, data) => {
+    const payload = data as { type?: string; rooms?: OpenRoomInfo[] };
+    if (payload?.type === 'directory_sync' && Array.isArray(payload.rooms)) {
+      const merged = mergeOpenRoomsList(loadOpenRooms(), payload.rooms);
+      saveOpenRooms(merged);
+      onRoomsUpdated(merged);
+    }
+  });
+  sharedLobbyMqtt = mqttHandle;
 
   let lobbyWs: WebSocket | null = null;
   const wsUrl = getPartyKitWebSocketUrl('lobby');
@@ -288,13 +543,10 @@ export function subscribeToOpenRoomsDirectory(
             type?: string;
             rooms?: OpenRoomInfo[];
           };
-          if (
-            data.type === 'directory_sync' &&
-            Array.isArray(data.rooms) &&
-            data.rooms.length > 0
-          ) {
-            saveOpenRooms(data.rooms);
-            onRoomsUpdated(data.rooms);
+          if (data.type === 'directory_sync' && Array.isArray(data.rooms)) {
+            const merged = mergeOpenRoomsList(loadOpenRooms(), data.rooms);
+            saveOpenRooms(merged);
+            onRoomsUpdated(merged);
           }
         } catch {
           // ignore
@@ -317,6 +569,10 @@ export function subscribeToOpenRoomsDirectory(
 
   return () => {
     bc?.close();
+    mqttHandle.close();
+    if (sharedLobbyMqtt === mqttHandle) {
+      sharedLobbyMqtt = null;
+    }
     lobbyWs?.close();
     if (typeof window !== 'undefined') {
       window.removeEventListener('storage', handleStorage);

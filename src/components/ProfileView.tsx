@@ -1,4 +1,4 @@
-import { Check, Copy, Pencil, Plus, Settings, Trophy, Users, X } from 'lucide-react';
+import { Check, Copy, Pencil, Plus, Settings, Share2, Trash2, Trophy, Users, X } from 'lucide-react';
 import React, { useState } from 'react';
 import {
   getNotificationPermission,
@@ -12,9 +12,9 @@ import {
   computePlaystyleMetrics,
   DEFAULT_USER_PROFILE,
   type PlaystyleArchetype,
-  saveUserProfile,
   type UserProfilePreferences,
   updateUserProfile,
+  upsertKnownPlayer,
 } from '../lib/profile';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { Avatar3D } from './poker/Avatar3D';
@@ -27,7 +27,7 @@ interface ProfileViewProps {
   onOpenCreateOrInviteModal: () => void;
 }
 
-const AVATAR_OPTIONS: Array<{ id: string; label: string }> = [
+export const AVATAR_OPTIONS: Array<{ id: string; label: string }> = [
   { id: 'hero', label: 'Gafas Verdes' },
   { id: 'emma', label: 'Emma' },
   { id: 'leo', label: 'Leo' },
@@ -52,12 +52,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 }) => {
   const [nameDraft, setNameDraft] = useState(profile.name);
   const [avatarDraft, setAvatarDraft] = useState(profile.avatarId);
+  const [friendNameInput, setFriendNameInput] = useState('');
   const [activeSheet, setActiveSheet] = useState<
     null | 'editProfile' | 'friends' | 'emotes' | 'cardBacks' | 'rank' | 'settings'
   >(null);
   const [copiedFriendLink, setCopiedFriendLink] = useState(false);
 
   const metrics = computePlaystyleMetrics(profile.stats);
+  const hasPlayedHands = metrics.archetype !== null;
 
   // SVG Diamond Radar Geometry (viewBox 0 0 360 300, center at cx=180, cy=150, max radius R=82)
   const cx = 180;
@@ -121,7 +123,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     },
   };
 
-  const activeCallout = archetypeConfig[metrics.archetype];
+  const activeCallout = metrics.archetype ? archetypeConfig[metrics.archetype] : null;
 
   const handleOpenProfileEditor = () => {
     setNameDraft(profile.name);
@@ -131,14 +133,78 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const handleSaveProfileEdit = (e?: React.FormEvent) => {
     e?.preventDefault();
-    const trimmed = nameDraft.trim() || 'isaac';
+    const trimmed = nameDraft.trim() || profile.name || 'Jugador';
     const next = updateUserProfile((prev) => ({
       ...prev,
       name: trimmed,
+      hasSetCustomName: true,
       avatarId: avatarDraft,
     }));
     onProfileChange(next);
     setActiveSheet(null);
+  };
+
+  const handleAddFriend = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = friendNameInput.trim();
+    if (!clean) return;
+    const avatars = ['leo', 'emma', 'akash', 'tori', 'evelyn', 'hero'];
+    const randomAvatar = avatars[profile.friends.length % avatars.length];
+    const friendId = 'friend_' + clean.toLowerCase().replace(/\s+/g, '_');
+
+    const next = updateUserProfile((prev) => {
+      if (prev.friends.some((f) => f.name.toLowerCase() === clean.toLowerCase())) {
+        return prev;
+      }
+      return {
+        ...prev,
+        friends: [
+          ...prev.friends,
+          {
+            id: friendId,
+            name: clean,
+            avatarId: randomAvatar,
+            addedAt: Date.now(),
+          },
+        ],
+      };
+    });
+    upsertKnownPlayer({
+      id: friendId,
+      name: clean,
+      avatarId: randomAvatar,
+      xp: 0,
+    });
+    onProfileChange(next);
+    setFriendNameInput('');
+  };
+
+  const handleRemoveFriend = (id: string) => {
+    const next = updateUserProfile((prev) => ({
+      ...prev,
+      friends: prev.friends.filter((f) => f.id !== id),
+    }));
+    onProfileChange(next);
+  };
+
+  const handleShareOrCopyRoomLink = async () => {
+    const code = activeRoomCode || 'MESA1';
+    const url = `${window.location.origin}/?room=${encodeURIComponent(code)}`;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Juegos de Cartas · Sala #${code}`,
+          text: `Únete a mi sala #${code} en Juegos de Cartas:`,
+          url,
+        });
+        return;
+      } catch {
+        // Fallback to clipboard copy
+      }
+    }
+    navigator.clipboard?.writeText(url);
+    setCopiedFriendLink(true);
+    setTimeout(() => setCopiedFriendLink(false), 1800);
   };
 
   const handleSelectCardBack = (colorId: CardBackColorId) => {
@@ -151,7 +217,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     onProfileChange(next);
   };
 
-  const rankProgressPct = Math.min(100, Math.max(18, Math.round(((profile.xp % 250) / 250) * 100)));
+  const rankProgressPct = Math.min(
+    100,
+    Math.max(profile.xp === 0 ? 4 : 12, Math.round(((profile.xp % 250) / 250) * 100))
+  );
   const xpToNextLevel = 250 - (profile.xp % 250);
   const cardBackIndex = CARD_BACK_ORDER.indexOf(profile.cardBackColor) + 1;
 
@@ -194,13 +263,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           onClick={handleOpenProfileEditor}
           className="mt-2.5 text-[22px] font-medium text-white tracking-tight hover:opacity-80 cursor-pointer"
         >
-          {profile.name}
+          {profile.name || 'Jugador'}
         </button>
       </div>
 
-      {/* 2x2 Action Pills + Full-Width Rank Progress Pill (matching image_2.png) */}
+      {/* 2x2 Action Pills + Full-Width Rank Progress Pill */}
       <div className="grid grid-cols-2 gap-3">
-        {/* Top-left: 👫 Amigos pill */}
+        {/* Top-left: 👫 Amigos pill (real friend count) */}
         <button
           type="button"
           onClick={() => setActiveSheet('friends')}
@@ -211,7 +280,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <span className="text-[15px] font-medium text-white leading-tight">
               Amigos
             </span>
-            <span className="text-[12px] text-[#7c7d85] mt-0.5">4 conectados</span>
+            <span className="text-[12px] text-[#7c7d85] mt-0.5">
+              {profile.friends.length}{' '}
+              {profile.friends.length === 1 ? 'agregado' : 'agregados'}
+            </span>
           </div>
         </button>
 
@@ -247,7 +319,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </div>
         </button>
 
-        {/* Middle-right: 2 (20) Card backs pill with mini card-back preview — opens Card Backs sheet */}
+        {/* Middle-right: Card backs pill with mini card-back preview */}
         <button
           type="button"
           onClick={() => setActiveSheet('cardBacks')}
@@ -327,9 +399,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       </button>
 
-      {/* Statistics Section + Playstyle Diamond Radar Chart (matching image_2.png) */}
+      {/* Statistics Section + Playstyle Diamond Radar Chart */}
       <div className="mt-7">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-1">
           <h2 className="text-[20px] font-semibold text-white tracking-tight">
             Statistics
           </h2>
@@ -337,6 +409,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             {profile.stats.handsPlayed} manos jugadas
           </span>
         </div>
+
+        {!hasPlayedHands && (
+          <p className="text-[12px] text-[#8e9099] mb-2">
+            Sin partidas aún · Juega manos para ver tu estilo
+          </p>
+        )}
 
         <div className="w-full flex flex-col items-center">
           <svg
@@ -404,31 +482,35 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               strokeDasharray="3 3"
             />
 
-            {/* Dynamic Playstyle Gradient Polygon */}
+            {/* Dynamic Playstyle Polygon (neutral small diamond when 0 hands played) */}
             <polygon
               points={polygonPoints}
-              fill="url(#playstyle-poly-grad)"
-              stroke="url(#playstyle-stroke-grad)"
+              fill={hasPlayedHands ? 'url(#playstyle-poly-grad)' : 'rgba(148, 163, 184, 0.14)'}
+              stroke={hasPlayedHands ? 'url(#playstyle-stroke-grad)' : '#475569'}
               strokeWidth="2"
               strokeLinejoin="round"
             />
 
-            {/* Callout dashed line pointing from polygon edge to active archetype badge */}
-            <line
-              x1={activeCallout.lineStartX}
-              y1={activeCallout.lineStartY}
-              x2={activeCallout.lineEndX}
-              y2={activeCallout.lineEndY}
-              stroke="#fb7185"
-              strokeWidth="1.4"
-              strokeDasharray="2.5 2.5"
-            />
-            <circle
-              cx={activeCallout.lineStartX}
-              cy={activeCallout.lineStartY}
-              r="2.8"
-              fill="#fb7185"
-            />
+            {/* Callout dashed line pointing from polygon edge to active archetype badge ONLY when hands played */}
+            {activeCallout && (
+              <>
+                <line
+                  x1={activeCallout.lineStartX}
+                  y1={activeCallout.lineStartY}
+                  x2={activeCallout.lineEndX}
+                  y2={activeCallout.lineEndY}
+                  stroke="#fb7185"
+                  strokeWidth="1.4"
+                  strokeDasharray="2.5 2.5"
+                />
+                <circle
+                  cx={activeCallout.lineStartX}
+                  cy={activeCallout.lineStartY}
+                  r="2.8"
+                  fill="#fb7185"
+                />
+              </>
+            )}
 
             {/* 4 Axis Labels */}
             <text
@@ -776,7 +858,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
-      {/* SHEET 5: FRIENDS */}
+      {/* SHEET 5: REAL FRIENDS */}
       {activeSheet === 'friends' && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-end justify-center p-4">
           <div className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4">
@@ -784,7 +866,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <div className="flex items-center gap-2">
                 <Users className="w-4 h-4 text-emerald-400" />
                 <span className="text-[16px] font-semibold text-white">
-                  Amigos &amp; Primos
+                  Amigos ({profile.friends.length})
                 </span>
               </div>
               <button
@@ -796,60 +878,90 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </button>
             </div>
 
-            <div className="flex flex-col gap-2">
-              {[
-                { id: 'leo', name: 'primo_leo', status: 'En Mesa de los Primos' },
-                { id: 'akash', name: 'akash', status: 'En Mesa en Vivo' },
-                { id: 'emma', name: 'emma_poker', status: 'Conectada' },
-                { id: 'tori', name: 'tori_v', status: 'Turno pendiente' },
-              ].map((fr) => (
-                <div
-                  key={fr.id}
-                  className="flex items-center justify-between bg-black/40 border border-[#23252a] rounded-[16px] px-3.5 py-2.5"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Avatar3D avatarId={fr.id} size={34} />
-                    <div>
-                      <div className="text-[14px] font-medium text-white">
-                        {fr.name}
+            <form onSubmit={handleAddFriend} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={friendNameInput}
+                onChange={(e) => setFriendNameInput(e.target.value)}
+                placeholder="Nombre de tu amigo (ej. Leo)"
+                maxLength={18}
+                className="flex-1 h-10 rounded-full bg-black border border-[#25272e] px-4 text-[13px] text-white placeholder:text-[#7c7d85] focus:outline-none focus:border-white"
+              />
+              <button
+                type="submit"
+                className="h-10 px-4 rounded-full bg-white text-black text-[12px] font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Agregar</span>
+              </button>
+            </form>
+
+            {profile.friends.length === 0 ? (
+              <div className="bg-black/40 border border-[#23252a] rounded-[18px] p-4 text-center text-[12px] text-[#8e9099]">
+                Aún no tienes amigos agregados · Comparte el enlace de tu sala por WhatsApp o agrega a tus amigos arriba.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto">
+                {profile.friends.map((fr) => (
+                  <div
+                    key={fr.id}
+                    className="flex items-center justify-between bg-black/40 border border-[#23252a] rounded-[16px] px-3.5 py-2.5"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Avatar3D avatarId={fr.avatarId} size={34} />
+                      <div>
+                        <div className="text-[14px] font-medium text-white">
+                          {fr.name}
+                        </div>
+                        <div className="text-[11px] text-[#7c7d85]">Amigo</div>
                       </div>
-                      <div className="text-[11px] text-emerald-400">{fr.status}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveSheet(null);
+                          onOpenCreateOrInviteModal();
+                        }}
+                        className="h-7 px-3 rounded-full bg-white text-black text-[11px] font-semibold cursor-pointer"
+                      >
+                        Crear Sala
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFriend(fr.id)}
+                        aria-label={`Eliminar ${fr.name}`}
+                        className="w-7 h-7 rounded-full bg-[#23252a] text-[#8e9099] hover:text-white flex items-center justify-center cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveSheet(null);
-                      onOpenCreateOrInviteModal();
-                    }}
-                    className="h-7 px-3 rounded-full bg-white text-black text-[11px] font-semibold cursor-pointer"
-                  >
-                    Invitar
-                  </button>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
 
             <button
               type="button"
-              onClick={() => {
-                navigator.clipboard?.writeText(
-                  `${window.location.origin}/?room=${activeRoomCode}`
-                );
-                setCopiedFriendLink(true);
-                setTimeout(() => setCopiedFriendLink(false), 1800);
-              }}
+              onClick={handleShareOrCopyRoomLink}
               className="w-full h-11 rounded-full bg-[#23252a] text-white text-[13px] font-medium flex items-center justify-center gap-2 cursor-pointer"
             >
               {copiedFriendLink ? (
                 <>
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>¡Enlace de sala #{activeRoomCode} copiado!</span>
+                  <span>¡Enlace de invitación copiado!</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-4 h-4" />
-                  <span>Copiar invitación a Sala #{activeRoomCode}</span>
+                  {typeof navigator !== 'undefined' && 'share' in navigator ? (
+                    <Share2 className="w-4 h-4" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                  <span>
+                    Compartir enlace de invitación
+                    {activeRoomCode ? ` (#${activeRoomCode})` : ''}
+                  </span>
                 </>
               )}
             </button>
@@ -882,7 +994,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     ? 'PartyKit Cloudflare WS'
                     : isSupabaseConfigured
                     ? 'Supabase Realtime'
-                    : 'Local + BroadcastChannel'}
+                    : 'MQTT WebSockets + Local'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -902,14 +1014,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <button
               type="button"
               onClick={() => {
-                const reset = saveUserProfile(DEFAULT_USER_PROFILE);
+                const reset = updateUserProfile((prev) => ({
+                  ...prev,
+                  xp: 0,
+                  level: 1,
+                  stats: { ...DEFAULT_USER_PROFILE.stats },
+                }));
                 onProfileChange(reset);
                 setActiveSheet(null);
               }}
               className="w-full h-10 rounded-full bg-[#23252a] text-white/80 text-[12px] font-medium flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 rotate-45" />
-              <span>Restaurar estadísticas de demostración</span>
+              <span>Reiniciar estadísticas a cero</span>
             </button>
           </div>
         </div>
