@@ -139,6 +139,13 @@ export function App() {
 
   useEffect(() => {
     syncRef.current?.disconnect();
+    // Bot rooms are 100% offline local single-player; never connect to remote network MQTT
+    if (roomCode === 'BOTS' || tableState.roomMode === 'bots') {
+      syncRef.current = null;
+      setOnlineCount(1);
+      return;
+    }
+
     const profile = loadUserProfile();
     const handle = connectToPokerRoom(
       roomCode,
@@ -156,13 +163,15 @@ export function App() {
     return () => {
       handle.disconnect();
     };
-  }, [roomCode]);
+  }, [roomCode, tableState.roomMode]);
 
   const handleBroadcastState = useCallback(
     (nextState: PokerTableState) => {
       setTableState(nextState);
       savePersistedRoomState(roomCode, nextState);
-      syncRef.current?.broadcastState(nextState);
+      if (roomCode !== 'BOTS' && nextState.roomMode !== 'bots') {
+        syncRef.current?.broadcastState(nextState);
+      }
     },
     [roomCode]
   );

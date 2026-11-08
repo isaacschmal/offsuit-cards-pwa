@@ -362,7 +362,12 @@ export function recordHandCompletedStats(
   state: PokerTableState,
   heroId = 'hero'
 ): UserProfilePreferences {
-  const heroWon = state.winnerIds.includes(heroId);
+  const profile = loadUserProfile();
+  const heroWon =
+    state.winnerIds.includes(heroId) ||
+    state.winnerIds.includes(profile.playerId) ||
+    (state.players[0] && state.winnerIds.includes(state.players[0].id));
+
   return updateUserProfile((prev) => ({
     ...prev,
     xp: prev.xp + (heroWon ? 25 : 8),

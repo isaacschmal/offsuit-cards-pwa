@@ -315,10 +315,22 @@ export function connectMqttTopics(
  */
 export function shouldAcceptIncomingState(
   current: PokerTableState | null | undefined,
-  incoming: PokerTableState
+  incoming: PokerTableState,
+  localPlayerId?: string
 ): boolean {
+  if (!incoming) return false;
+  // Bot practice rooms are strictly local single-player offline sessions; never accept remote state!
+  if (incoming.roomMode === 'bots' || current?.roomMode === 'bots' || incoming.roomId === 'BOTS') {
+    return false;
+  }
+
   if (!current) return true;
   if (current.roomId !== incoming.roomId) return true;
+
+  // Never accept our own echoed state back from network
+  if (localPlayerId && incoming.updatedBy === localPlayerId) {
+    return false;
+  }
 
   const incomingSeated = getSeatedPlayersCount(incoming.players);
   const currentSeated = getSeatedPlayersCount(current.players);
@@ -334,7 +346,8 @@ export function shouldAcceptIncomingState(
 
   const incVer = incoming.stateVersion ?? 0;
   const curVer = current.stateVersion ?? 0;
-  return incVer >= curVer;
+  // Strictly require incoming version to be strictly greater than current version
+  return incVer > curVer;
 }
 
 export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [];

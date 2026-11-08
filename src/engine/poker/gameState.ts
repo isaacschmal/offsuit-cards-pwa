@@ -161,16 +161,19 @@ export function seatPlayerInTable(
       ? Math.round(participant.stack)
       : (state.tableBuyIn ?? 200);
 
-  // In bots mode, just keep seat 0 updated with local player's identity
+  // In bots mode, keep seat 0 updated with local player's id and identity
   if (state.roomMode === 'bots') {
     const heroSeat = state.players[0];
     if (
       heroSeat &&
-      (heroSeat.name !== cleanName || heroSeat.avatarId !== cleanAvatar)
+      (heroSeat.id !== participant.id ||
+        heroSeat.name !== cleanName ||
+        heroSeat.avatarId !== cleanAvatar)
     ) {
       const updatedPlayers = [...state.players];
       updatedPlayers[0] = {
         ...heroSeat,
+        id: participant.id,
         name: cleanName,
         avatarId: cleanAvatar,
       };
@@ -552,13 +555,16 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
     (p) => !isVacantSeat(p) && p.status !== 'folded' && p.status !== 'out'
   );
 
-  if (contenders.length === 1) {
-    const soleWinner = contenders[0];
+  const nextVersion = (state.stateVersion ?? 1) + 1;
+
+  if (contenders.length <= 1) {
+    const soleWinner = contenders[0] ?? playersClearedBets[0];
     const updatedPlayers = playersClearedBets.map((p) =>
       p.id === soleWinner.id ? { ...p, stack: p.stack + finalPot } : p
     );
     return {
       ...state,
+      stateVersion: nextVersion,
       players: updatedPlayers,
       collectedPot: finalPot,
       street: 'showdown',
@@ -569,15 +575,21 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
 
   // Evaluate all contenders' 7-card hands
   const evalMap = new Map<string, ReturnType<typeof evaluateHoldemHand>>();
+  let topHandName: string | null = null;
+  let topHandScore = -1;
+
   for (const c of contenders) {
-    evalMap.set(c.id, evaluateHoldemHand([...c.holeCards, ...state.communityCards]));
+    const ev = evaluateHoldemHand([...c.holeCards, ...state.communityCards]);
+    evalMap.set(c.id, ev);
+    if (ev.score > topHandScore) {
+      topHandScore = ev.score;
+      topHandName = ev.categoryName;
+    }
   }
 
   const sidePots = computeSidePots(playersClearedBets);
   const winnings = new Map<string, number>();
   const overallWinnerIds = new Set<string>();
-  let topHandName: string | null = null;
-  let topHandScore = -1;
 
   for (const pot of sidePots) {
     const eligible = pot.eligiblePlayerIds.filter((id) => evalMap.has(id));
@@ -594,10 +606,6 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
       } else if (ev.score === bestScore) {
         potWinners.push(id);
       }
-      if (ev.score > topHandScore) {
-        topHandScore = ev.score;
-        topHandName = ev.categoryName;
-      }
     }
 
     const share = Math.floor(pot.amount / potWinners.length);
@@ -610,6 +618,30 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
     });
   }
 
+  // Guaranteed Pot Conservation: ensure 100% of finalPot chips are awarded!
+  // If computeSidePots had any skipped pots without eligible players, or rounding remainder,
+  // distribute all remaining chips directly to the contender(s) with the highest hand score!
+  let totalDistributed = 0;
+  for (const amt of winnings.values()) {
+    totalDistributed += amt;
+  }
+
+  const undistributedPot = Math.max(0, finalPot - totalDistributed);
+  if (undistributedPot > 0) {
+    const bestContenders = contenders.filter(
+      (c) => (evalMap.get(c.id)?.score ?? -1) === topHandScore
+    );
+    const recipients = bestContenders.length > 0 ? bestContenders : contenders;
+    const share = Math.floor(undistributedPot / recipients.length);
+    const remainder = undistributedPot - share * recipients.length;
+
+    recipients.forEach((c, idx) => {
+      overallWinnerIds.add(c.id);
+      const extra = idx === 0 ? remainder : 0;
+      winnings.set(c.id, (winnings.get(c.id) ?? 0) + share + extra);
+    });
+  }
+
   const updatedPlayers = playersClearedBets.map((p) => {
     const won = winnings.get(p.id) ?? 0;
     return won > 0 ? { ...p, stack: p.stack + won } : p;
@@ -617,6 +649,7 @@ function resolveShowdown(state: PokerTableState): PokerTableState {
 
   return {
     ...state,
+    stateVersion: nextVersion,
     players: updatedPlayers,
     collectedPot: finalPot,
     sidePots,

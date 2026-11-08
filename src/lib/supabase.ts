@@ -50,6 +50,16 @@ export function connectToPokerRoom(
   onPresenceChange?: (count: number) => void
 ): RoomSyncHandle {
   const normalizedCode = roomCode.trim().toUpperCase();
+
+  // Bot practice rooms are strictly local single-player; never connect to remote network MQTT
+  if (normalizedCode === 'BOTS') {
+    return {
+      broadcastState: () => {},
+      disconnect: () => {},
+      mode: 'mqtt-p2p',
+    };
+  }
+
   const stateTopic = `cartas/v5/room/${normalizedCode}/state`;
   const eventsTopic = `cartas/v5/room/${normalizedCode}/events`;
   let hasReceivedPeerTableState = false;
@@ -99,22 +109,28 @@ export function connectToPokerRoom(
   }
 
   function handleIncomingTableState(incoming: PokerTableState): void {
-    if (!incoming || !Array.isArray(incoming.players)) return;
+    if (!incoming || !Array.isArray(incoming.players) || incoming.roomMode === 'bots') return;
     hasReceivedPeerTableState = true;
     recordRoomHumanPlayers(incoming);
 
+    const localProfile = loadUserProfile();
     const currentLocal = loadPersistedRoomState(normalizedCode);
-    if (!shouldAcceptIncomingState(currentLocal, incoming)) {
+    if (!shouldAcceptIncomingState(currentLocal, incoming, localProfile.playerId)) {
       return;
     }
 
-    const localProfile = loadUserProfile();
     if (incoming.roomMode === 'real') {
+      const existingMe = incoming.players.find((p) => p.id === localProfile.playerId);
+      const effectiveStack =
+        existingMe && existingMe.stack > 0
+          ? existingMe.stack
+          : (incoming.tableBuyIn ?? 200);
+
       const { state: withMe, changed } = seatPlayerInTable(incoming, {
         id: localProfile.playerId,
         name: localProfile.name || playerName || 'Jugador',
         avatarId: localProfile.avatarId,
-        stack: localProfile.bankroll,
+        stack: effectiveStack,
       });
       savePersistedRoomState(normalizedCode, withMe);
       onPresenceChange?.(Math.max(1, getSeatedPlayersCount(withMe.players)));

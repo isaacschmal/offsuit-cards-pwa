@@ -68,9 +68,18 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
   useEffect(() => {
     if (externalState) {
+      // Never let external state overwrite local bot practice games
+      if (tableState.roomMode === 'bots') return;
+      if (
+        externalState.handNumber < tableState.handNumber ||
+        (externalState.handNumber === tableState.handNumber &&
+          (externalState.stateVersion ?? 0) <= (tableState.stateVersion ?? 0))
+      ) {
+        return;
+      }
       setTableState(externalState);
     }
-  }, [externalState]);
+  }, [externalState, tableState.roomMode, tableState.handNumber, tableState.stateVersion]);
 
   const resolvedHeroIndex = useMemo(() => {
     const idx = tableState.players.findIndex((p) => p.id === profileState.playerId);
@@ -548,16 +557,20 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                   className="w-full h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-medium flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
                 >
                   <span>
-                    {tableState.winnerIds.includes(hero.id)
-                      ? `You won ${tableState.collectedPot}`
+                    {tableState.winnerIds.includes(hero.id) ||
+                    tableState.winnerIds.includes(profileState.playerId) ||
+                    (resolvedHeroIndex === 0 &&
+                      (tableState.winnerIds.includes('hero') ||
+                        tableState.winnerIds.includes(tableState.players[0]?.id)))
+                      ? `Ganaste ${tableState.collectedPot} fichas`
                       : `${
                           tableState.players.find((p) =>
                             tableState.winnerIds.includes(p.id)
-                          )?.name ?? 'Player'
-                        } won ${tableState.collectedPot}`}
+                          )?.name ?? 'Jugador'
+                        } ganó ${tableState.collectedPot} fichas`}
                     {tableState.winningHandName ? ` · ${tableState.winningHandName}` : ''}
                   </span>
-                  <span className="text-[#7c7d85] ml-1">· Next Hand →</span>
+                  <span className="text-[#7c7d85] ml-1">· Siguiente mano →</span>
                 </button>
               </div>
             )

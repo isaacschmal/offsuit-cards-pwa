@@ -441,6 +441,64 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
 
     expect(loadUserProfile().bankroll).toBe(1000);
   });
+
+  it('reliably adds won pot to player table stack upon hand win and preserves it into next hand', async () => {
+    const {
+      createInitialTableState,
+      applyPlayerAction,
+      startNewHand,
+      seatPlayerInTable,
+    } = await import('../gameState');
+    const { shouldAcceptIncomingState } = await import('../../../lib/multiplayer');
+
+    // 1. Hero wins when all opponents fold
+    let table = createInitialTableState('BOTS', 'bots', false, 100);
+    table = seatPlayerInTable(table, {
+      id: 'p_hero_test',
+      name: 'Isaac',
+      avatarId: 'hero',
+      stack: 100,
+    }).state;
+
+    expect(table.players[0].id).toBe('p_hero_test');
+    expect(table.players[0].stack).toBe(100);
+    const initialTotalChips = table.players.reduce((sum, p) => sum + p.stack + p.currentBet, 0);
+
+    // Hero raises to 20
+    table = applyPlayerAction(table, 'p_hero_test', { type: 'raise', raiseToAmount: 20 });
+    expect(table.players[0].stack).toBe(80);
+    expect(table.players[0].currentBet).toBe(20);
+
+    // All 5 bots fold one by one
+    while (table.street !== 'showdown') {
+      const currentActor = table.players[table.currentTurnIndex];
+      table = applyPlayerAction(table, currentActor.id, { type: 'fold' });
+    }
+
+    expect(table.street).toBe('showdown');
+    expect(table.winnerIds).toContain('p_hero_test');
+    // Blinds were 1 (SB) + 2 (BB) + Hero's 20 = 23 pot
+    expect(table.collectedPot).toBe(23);
+    // Hero started with 100, put in 20 (stack 80), won pot of 23 -> Hero table stack is now 103!
+    expect(table.players[0].stack).toBe(103);
+
+    // Total chips on table strictly conserved
+    const totalChipsAfterWin = table.players.reduce((sum, p) => sum + p.stack, 0);
+    expect(totalChipsAfterWin).toBe(initialTotalChips);
+
+    // 2. Deal next hand -> preserves Hero's table stack of 103 (posting blinds according to rotation)
+    const nextHand = startNewHand(table, false);
+    expect(nextHand.handNumber).toBe(2);
+    expect(nextHand.street).toBe('preflop');
+    const heroInNewHand = nextHand.players.find((p) => p.id === 'p_hero_test')!;
+    // Hero's total chips (stack + current posted bet) must be 103!
+    expect(heroInNewHand.stack + heroInNewHand.currentBet).toBe(103);
+
+    // 3. Bot tables strictly reject any incoming remote state
+    const remoteBotState = { ...table, stateVersion: 999 };
+    expect(shouldAcceptIncomingState(table, remoteBotState)).toBe(false);
+  });
 });
+
 
 
