@@ -216,7 +216,7 @@ export function App() {
         } else {
           const profile = loadUserProfile();
           const updatedPlayers = tableState.players.map((p) =>
-            p.id === profile.playerId
+            p.id === profile.playerId || p.id === 'hero'
               ? { ...p, stack: 0, status: 'out' as const }
               : p
           );

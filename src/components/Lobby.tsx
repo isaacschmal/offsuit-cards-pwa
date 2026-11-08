@@ -21,6 +21,7 @@ import {
   getNotificationPermission,
   loadOpenRooms,
   loadPersistedRoomState,
+  cashOutAndLeavePersistedRoom,
   type OpenRoomInfo,
   type RoomPacingMode,
   type RoomPlayersMode,
@@ -199,10 +200,25 @@ export const Lobby: React.FC<LobbyProps> = ({
     (r) => r.roomMode === 'real' && r.pacingMode === 'live'
   ).length;
 
+  const activeTablesChips = useMemo(() => {
+    return activeGames.reduce((acc, g) => acc + g.tableStack, 0);
+  }, [activeGames]);
+
+  const totalBalance = profile.bankroll + activeTablesChips;
+
   const handleDeleteRoom = (code: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const updated = deleteOpenRoom(code);
+    const updated = deleteOpenRoom(code, profile.playerId);
     setOpenRooms(updated);
+    setProfile(loadUserProfile());
+  };
+
+  const handleCashOutActiveGame = (code: string) => {
+    const { cashedOut } = cashOutAndLeavePersistedRoom(code, profile.playerId);
+    if (cashedOut > 0) {
+      setProfile(loadUserProfile());
+      setOpenRooms(loadOpenRooms());
+    }
   };
 
   const handleCompleteWelcome = (e: React.FormEvent) => {
@@ -402,12 +418,25 @@ export const Lobby: React.FC<LobbyProps> = ({
                 </span>
                 <div className="flex items-baseline gap-2 mt-0.5">
                   <span className="font-extralight text-[64px] tracking-tight leading-none text-white">
-                    {profile.bankroll.toLocaleString('en-US')}
+                    {totalBalance.toLocaleString('en-US')}
                   </span>
                   <span className="text-[17px] font-medium text-[#eab308]">
                     {currentLang === 'en' ? 'chips' : currentLang === 'it' ? 'chip' : 'fichas'}
                   </span>
                 </div>
+                {activeTablesChips > 0 && (
+                  <div className="flex items-center gap-2 mt-1.5 text-[11.5px] text-[#9ca3af]">
+                    <span>
+                      {currentLang === 'en' ? 'Wallet' : currentLang === 'it' ? 'Portafoglio' : 'Billetera'}:{' '}
+                      <strong className="text-white">{profile.bankroll.toLocaleString('en-US')}</strong>
+                    </span>
+                    <span>·</span>
+                    <span>
+                      {currentLang === 'en' ? 'In tables' : currentLang === 'it' ? 'Nei tavoli' : 'En mesas'}:{' '}
+                      <strong className="text-[#eab308]">{activeTablesChips.toLocaleString('en-US')}</strong>
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* ACTIVE GAMES (Partidas en curso / Por turnos) */}
@@ -487,22 +516,39 @@ export const Lobby: React.FC<LobbyProps> = ({
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onJoinOrCreateRoom(
-                              game.room.code,
-                              game.room.pacingMode,
-                              game.room.name,
-                              game.room.roomMode,
-                              game.room.buyIn
-                            )
-                          }
-                          className="h-8 px-3.5 rounded-full bg-white text-black text-[12px] font-bold flex items-center gap-1 shrink-0 active:scale-95 transition-transform cursor-pointer shadow-md"
-                        >
-                          <span>{t(currentLang, 'rejoinTable')}</span>
-                          <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleCashOutActiveGame(game.room.code)}
+                            title={
+                              currentLang === 'en'
+                                ? `Cash out ${game.tableStack} chips and leave`
+                                : currentLang === 'it'
+                                ? `Incassa ${game.tableStack} chip ed esci`
+                                : `Cobrar ${game.tableStack} fichas y salir`
+                            }
+                            className="h-8 px-2.5 rounded-full bg-[#1b1d24] border border-[#2d303b] text-emerald-400 hover:text-emerald-300 text-[11.5px] font-semibold flex items-center gap-1 active:scale-95 transition-all cursor-pointer"
+                          >
+                            <span>💰</span>
+                            <span>{currentLang === 'en' ? 'Cash out' : currentLang === 'it' ? 'Incassa' : 'Cobrar'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onJoinOrCreateRoom(
+                                game.room.code,
+                                game.room.pacingMode,
+                                game.room.name,
+                                game.room.roomMode,
+                                game.room.buyIn
+                              )
+                            }
+                            className="h-8 px-3 rounded-full bg-white text-black text-[12px] font-bold flex items-center gap-1 active:scale-95 transition-transform cursor-pointer shadow-md"
+                          >
+                            <span>{t(currentLang, 'rejoinTable')}</span>
+                            <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -537,15 +583,23 @@ export const Lobby: React.FC<LobbyProps> = ({
                 </button>
               </form>
 
-              {/* BANKRUPTCY RECOVERY BONUS BANNER (When bankroll is 0) */}
-              {profile.bankroll <= 0 && (
+              {/* BANKRUPTCY RECOVERY BONUS BANNER (ONLY when truly 0 chips across wallet and active tables) */}
+              {totalBalance <= 0 ? (
                 <div className="mx-5 mb-3 p-3 rounded-[20px] bg-red-950/40 border border-red-500/30 flex items-center justify-between gap-3 shrink-0">
                   <div className="flex flex-col text-left">
                     <span className="text-[13px] font-semibold text-red-200">
-                      Bancarrota (0 fichas)
+                      {currentLang === 'en'
+                        ? 'Bankrupt (0 chips)'
+                        : currentLang === 'it'
+                        ? 'Bancarotta (0 chip)'
+                        : 'Bancarrota (0 fichas)'}
                     </span>
                     <span className="text-[11px] text-red-300/80 mt-0.5">
-                      Reclama tu bono de recuperación (+200) para volver a las mesas
+                      {currentLang === 'en'
+                        ? 'Claim your recovery bonus (+200) to return to the tables'
+                        : currentLang === 'it'
+                        ? 'Richiedi il tuo bonus di recupero (+200) per tornare ai tavoli'
+                        : 'Reclama tu bono de recuperación (+200) para volver a las mesas'}
                     </span>
                   </div>
                   <button
@@ -556,10 +610,29 @@ export const Lobby: React.FC<LobbyProps> = ({
                     }}
                     className="h-8 px-3 rounded-full bg-white text-black text-[12px] font-bold shrink-0 active:scale-95 transition-transform cursor-pointer"
                   >
-                    +200 fichas
+                    +200 {currentLang === 'en' ? 'chips' : currentLang === 'it' ? 'chip' : 'fichas'}
                   </button>
                 </div>
-              )}
+              ) : profile.bankroll <= 0 && activeTablesChips > 0 ? (
+                <div className="mx-5 mb-3 p-3 rounded-[20px] bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-3 shrink-0">
+                  <div className="flex flex-col text-left">
+                    <span className="text-[12.5px] font-semibold text-amber-200">
+                      {currentLang === 'en'
+                        ? `You have ${activeTablesChips} chips in active tables`
+                        : currentLang === 'it'
+                        ? `Hai ${activeTablesChips} chip nei tavoli attivi`
+                        : `Tienes ${activeTablesChips} fichas en tus mesas activas`}
+                    </span>
+                    <span className="text-[11px] text-amber-300/80 mt-0.5">
+                      {currentLang === 'en'
+                        ? 'Cash them out above or keep playing'
+                        : currentLang === 'it'
+                        ? 'Incassale sopra o continua a giocare'
+                        : 'Cóbralas arriba para tu billetera o sigue jugando'}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
 
               {/* HORIZONTAL PASTEL GRADIENT CARDS CAROUSEL (Edge-to-Edge Full Bleed, Never Clipped at 16px) */}
               <div

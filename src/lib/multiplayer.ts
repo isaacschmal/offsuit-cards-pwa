@@ -6,7 +6,7 @@ import {
   type RoomPlayersMode,
   seatPlayerInTable,
 } from '../engine/poker/gameState';
-import { loadUserProfile } from './profile';
+import { loadUserProfile, returnTableStack } from './profile';
 import { supabase } from './supabase';
 
 export type RoomPacingMode = 'live' | 'async';
@@ -512,13 +512,31 @@ export function upsertOpenRoom(room: OpenRoomInfo): OpenRoomInfo[] {
   return updated;
 }
 
-export function deleteOpenRoom(roomCode: string): OpenRoomInfo[] {
+export function deleteOpenRoom(roomCode: string, refundPlayerId?: string): OpenRoomInfo[] {
   const normalized = roomCode.trim().toUpperCase();
   recordDeletedRoomTimestamp(normalized, Date.now());
+
+  // Automatically cash out/refund any chips the player had seated at this table!
+  const targetId =
+    refundPlayerId ??
+    (typeof window !== 'undefined' ? loadUserProfile().playerId : undefined);
+  if (targetId) {
+    const saved = loadPersistedRoomState(normalized);
+    if (saved && Array.isArray(saved.players)) {
+      const hero = saved.players.find(
+        (p) => (p.id === targetId || p.id === 'hero') && p.status !== 'out'
+      );
+      if (hero && hero.stack > 0) {
+        returnTableStack(hero.stack);
+      }
+    }
+  }
+
   const existing = loadOpenRooms();
   const updated = existing.filter((r) => r.code !== normalized);
   saveOpenRooms(updated);
 
+  memoryRoomStates.delete(normalized);
   if (typeof window !== 'undefined' && window.localStorage) {
     try {
       window.localStorage.removeItem(`${ROOM_STATE_PREFIX}${normalized}`);
@@ -531,6 +549,53 @@ export function deleteOpenRoom(roomCode: string): OpenRoomInfo[] {
   sharedLobbyMqtt?.publish(stateTopic, null, true);
   broadcastDirectoryUpdate(updated, normalized);
   return updated;
+}
+
+/**
+ * Cashes out player's stack from a persisted room state into their wallet,
+ * vacates their seat, and updates/broadcasts the room state.
+ */
+export function cashOutAndLeavePersistedRoom(
+  roomCode: string,
+  playerId?: string
+): { cashedOut: number; updatedState: PokerTableState | null } {
+  const normalized = roomCode.trim().toUpperCase();
+  const targetId = playerId ?? loadUserProfile().playerId;
+  const saved = loadPersistedRoomState(normalized);
+  if (!saved || !Array.isArray(saved.players)) {
+    return { cashedOut: 0, updatedState: null };
+  }
+
+  const heroIndex = saved.players.findIndex(
+    (p) => (p.id === targetId || p.id === 'hero') && p.status !== 'out'
+  );
+  if (heroIndex === -1) {
+    return { cashedOut: 0, updatedState: saved };
+  }
+
+  const hero = saved.players[heroIndex];
+  const cashedOut = hero.stack > 0 ? hero.stack : 0;
+  if (cashedOut > 0) {
+    returnTableStack(cashedOut);
+  }
+
+  if (saved.roomMode === 'bots' || normalized === 'BOTS') {
+    deletePersistedRoomState(normalized);
+    return { cashedOut, updatedState: null };
+  }
+
+  const updatedPlayers = saved.players.map((p, idx) =>
+    idx === heroIndex ? { ...p, stack: 0, status: 'out' as const } : p
+  );
+
+  const nextState: PokerTableState = {
+    ...saved,
+    players: updatedPlayers,
+    stateVersion: (saved.stateVersion ?? 1) + 1,
+  };
+
+  savePersistedRoomState(normalized, nextState);
+  return { cashedOut, updatedState: nextState };
 }
 
 export function createNewOpenRoom(
@@ -572,22 +637,46 @@ export function createNewOpenRoom(
   return newRoom;
 }
 
+export const memoryRoomStates = new Map<string, PokerTableState>();
+
+if (typeof globalThis !== 'undefined') {
+  (globalThis as any).__CARTAS_ACTIVE_TABLES_CHIPS__ = (targetId: string) => {
+    let sum = 0;
+    for (const state of memoryRoomStates.values()) {
+      if (state && Array.isArray(state.players)) {
+        const hero = state.players.find(
+          (p: any) =>
+            p && (p.id === targetId || p.id === 'hero') && p.status !== 'out'
+        );
+        if (hero && typeof hero.stack === 'number' && hero.stack > 0) {
+          sum += hero.stack;
+        }
+      }
+    }
+    return sum;
+  };
+}
+
 export function loadPersistedRoomState(roomCode: string): PokerTableState | null {
-  if (typeof window === 'undefined' || !window.localStorage) return null;
+  const normalized = roomCode.trim().toUpperCase();
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return memoryRoomStates.get(normalized) ?? null;
+  }
   try {
-    const key = `${ROOM_STATE_PREFIX}${roomCode.trim().toUpperCase()}`;
+    const key = `${ROOM_STATE_PREFIX}${normalized}`;
     const raw = window.localStorage.getItem(key);
-    if (!raw) return null;
+    if (!raw) return memoryRoomStates.get(normalized) ?? null;
     return JSON.parse(raw) as PokerTableState;
   } catch {
-    return null;
+    return memoryRoomStates.get(normalized) ?? null;
   }
 }
 
 export function savePersistedRoomState(roomCode: string, state: PokerTableState): void {
+  const normalized = roomCode.trim().toUpperCase();
+  memoryRoomStates.set(normalized, state);
   if (typeof window === 'undefined' || !window.localStorage) return;
   try {
-    const normalized = roomCode.trim().toUpperCase();
     const key = `${ROOM_STATE_PREFIX}${normalized}`;
     window.localStorage.setItem(key, JSON.stringify(state));
 
@@ -616,9 +705,10 @@ export function savePersistedRoomState(roomCode: string, state: PokerTableState)
 }
 
 export function deletePersistedRoomState(roomCode: string): void {
+  const normalized = roomCode.trim().toUpperCase();
+  memoryRoomStates.delete(normalized);
   if (typeof window === 'undefined' || !window.localStorage) return;
   try {
-    const normalized = roomCode.trim().toUpperCase();
     const key = `${ROOM_STATE_PREFIX}${normalized}`;
     window.localStorage.removeItem(key);
   } catch {

@@ -498,6 +498,78 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
     const remoteBotState = { ...table, stateVersion: 999 };
     expect(shouldAcceptIncomingState(table, remoteBotState)).toBe(false);
   });
+
+  it('prevents claiming 200 bankruptcy bonus when player has chips in active tables, and allows easy cashout', async () => {
+    const {
+      savePlayerBankroll,
+      deductTableBuyIn,
+      claimBankruptcyBonus,
+      getPlayerActiveTablesChips,
+      loadUserProfile,
+    } = await import('../../../lib/profile');
+    const {
+      savePersistedRoomState,
+      cashOutAndLeavePersistedRoom,
+      deleteOpenRoom,
+      createNewOpenRoom,
+    } = await import('../../../lib/multiplayer');
+    const { createInitialTableState, seatPlayerInTable } = await import(
+      '../gameState'
+    );
+
+    // Set wallet to 200 chips
+    savePlayerBankroll(200);
+    const profile = loadUserProfile();
+    expect(profile.bankroll).toBe(200);
+
+    // Player enters table with all 200 chips
+    const { paid, remainingBankroll } = deductTableBuyIn(200);
+    expect(paid).toBe(200);
+    expect(remainingBankroll).toBe(0);
+    expect(loadUserProfile().bankroll).toBe(0);
+
+    // Create room with player seated holding 200 chips
+    createNewOpenRoom('Test Room', 'live', 'ROOM99', 'real', 200);
+    let table = createInitialTableState('ROOM99', 'real', false, 200);
+    table = seatPlayerInTable(table, {
+      id: profile.playerId,
+      name: profile.name,
+      avatarId: profile.avatarId,
+      stack: 200,
+    }).state;
+    savePersistedRoomState('ROOM99', table);
+
+    // 1. Verify getPlayerActiveTablesChips identifies the 200 chips
+    const activeChips = getPlayerActiveTablesChips(profile.playerId);
+    expect(activeChips).toBe(200);
+
+    // 2. Player wallet is 0, but total money is 200 -> claimBankruptcyBonus must be REJECTED!
+    const attemptedClaim = claimBankruptcyBonus();
+    expect(attemptedClaim.bankroll).toBe(0); // NOT 200! Did NOT grant free chips!
+
+    // 3. Player cashes out from the room
+    const { cashedOut, updatedState } = cashOutAndLeavePersistedRoom('ROOM99', profile.playerId);
+    expect(cashedOut).toBe(200);
+    expect(loadUserProfile().bankroll).toBe(200); // 200 chips safely returned to wallet!
+    expect(updatedState?.players.find((p) => p.id === profile.playerId)?.status).toBe('out');
+
+    // 4. Test deleteOpenRoom auto-refunds seated chips if player hadn't cashed out yet
+    savePlayerBankroll(0);
+    createNewOpenRoom('Refund Room', 'live', 'ROOM88', 'real', 150);
+    let table88 = createInitialTableState('ROOM88', 'real', false, 150);
+    table88 = seatPlayerInTable(table88, {
+      id: profile.playerId,
+      name: profile.name,
+      avatarId: profile.avatarId,
+      stack: 150,
+    }).state;
+    savePersistedRoomState('ROOM88', table88);
+    expect(loadUserProfile().bankroll).toBe(0);
+
+    deleteOpenRoom('ROOM88', profile.playerId);
+    // Chips were automatically refunded upon deleting room!
+    expect(loadUserProfile().bankroll).toBe(150);
+  });
 });
 
 

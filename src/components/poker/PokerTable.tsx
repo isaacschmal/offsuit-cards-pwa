@@ -229,23 +229,25 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     return allBotsEliminated || (reachedMaxHands && tableState.street === 'showdown');
   }, [tableState.roomMode, allBotsEliminated, reachedMaxHands, tableState.street]);
 
-  // Safe Back Button handler: Never blocks async / turn-based players from returning to menu!
+  // Back button handler: allows player to choose cashout or keeping seat in multiplayer
   const handleBackButtonClick = () => {
     triggerHaptic('light');
 
-    // In turn-based / async mode: players can freely return to the menu anytime
-    // without folding or cashing out! Game continues and seat & stack are preserved.
-    if (pacingMode === 'async') {
-      onBack(hero.stack, false);
-      return;
-    }
-
-    // In solo bot mode: leaving cashes out remaining table stack to wallet
+    // In solo bot mode: leaving cashes out remaining table stack to wallet immediately
     if (tableState.roomMode === 'bots') {
       onBack(hero.stack, true);
       return;
     }
 
+    // In multiplayer games: open options modal so player can choose:
+    // 1) Cash out and vacate seat
+    // 2) Keep seat and chips, return to menu
+    // 3) Keep playing
+    setIsLeaveConfirmOpen(true);
+  };
+
+  const handleCashOutAndLeave = () => {
+    triggerHaptic('medium');
     const hasActiveChipsInPot =
       seatedCount >= 2 &&
       tableState.street !== 'showdown' &&
@@ -253,28 +255,22 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       hero.totalHandBet > 0;
 
     if (hasActiveChipsInPot) {
-      setIsLeaveConfirmOpen(true);
-      return;
+      recordPlayerActionStats({ type: 'fold' });
+      const foldedState = forceFoldPlayerForLeave(tableState, hero.id);
+      if (foldedState.street === 'showdown') {
+        recordHandCompletedStats(foldedState, hero.id);
+      }
+      const updatedHero =
+        foldedState.players[resolvedHeroIndex] ?? foldedState.players[0] ?? hero;
+      setTableState(foldedState);
+      savePersistedRoomState(foldedState.roomId, foldedState);
+      onBroadcastState?.(foldedState);
+      setIsLeaveConfirmOpen(false);
+      onBack(updatedHero.stack, true); // true = cash out & leave seat permanently
+    } else {
+      setIsLeaveConfirmOpen(false);
+      onBack(hero.stack, true); // true = cash out & leave seat permanently
     }
-
-    // Live mode with 0 chips currently bet: return to menu keeping seat by default
-    onBack(hero.stack, false);
-  };
-
-  const handleConfirmFoldAndLeave = () => {
-    triggerHaptic('medium');
-    recordPlayerActionStats({ type: 'fold' });
-    const foldedState = forceFoldPlayerForLeave(tableState, hero.id);
-    if (foldedState.street === 'showdown') {
-      recordHandCompletedStats(foldedState, hero.id);
-    }
-    const updatedHero =
-      foldedState.players[resolvedHeroIndex] ?? foldedState.players[0] ?? hero;
-    setTableState(foldedState);
-    savePersistedRoomState(foldedState.roomId, foldedState);
-    onBroadcastState?.(foldedState);
-    setIsLeaveConfirmOpen(false);
-    onBack(updatedHero.stack, true); // true = cash out & leave seat permanently
   };
 
   const handleHeroAction = (action: PlayerActionInput) => {
@@ -876,47 +872,105 @@ export const PokerTable: React.FC<PokerTableProps> = ({
           </div>
         </div>
 
-        {/* LEAVE MID-HAND CONFIRMATION MODAL (Stack Protection) */}
+        {/* LEAVE TABLE MODAL (Explicit Cash Out vs Keep Seat) */}
         {isLeaveConfirmOpen && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
             <div className="w-full max-w-[360px] bg-[#16171b] border border-[#282a33] rounded-[24px] p-5 flex flex-col gap-4 shadow-2xl">
-              <div className="flex flex-col gap-1.5 text-center">
+              <div className="flex flex-col gap-1 text-center">
+                <span className="text-[28px] leading-none mb-1">🚪</span>
                 <h3 className="text-[17px] font-semibold text-white">
-                  {t(currentLang, 'leaveHandTitle')}
+                  {currentLang === 'en'
+                    ? 'Exit Table Options'
+                    : currentLang === 'it'
+                    ? 'Opzioni di uscita dal tavolo'
+                    : 'Opciones de salida de la mesa'}
                 </h3>
                 <p className="text-[13px] text-[#9ca3af] leading-snug">
-                  {t(currentLang, 'leaveHandDesc')}
+                  {currentLang === 'en'
+                    ? `You currently have ${hero.stack} chips at this table.`
+                    : currentLang === 'it'
+                    ? `Hai ${hero.stack} chip a questo tavolo.`
+                    : `Tienes ${hero.stack} fichas en esta mesa.`}
                 </p>
               </div>
 
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2.5">
+                {/* Option 1: Cash out and leave permanently */}
                 <button
                   type="button"
-                  onClick={() => setIsLeaveConfirmOpen(false)}
-                  className="w-full h-11 rounded-full bg-white text-black text-[14px] font-semibold active:scale-95 transition-transform cursor-pointer"
+                  onClick={handleCashOutAndLeave}
+                  className="w-full rounded-[18px] bg-emerald-500/15 border border-emerald-500/35 p-3 flex flex-col text-left active:scale-[0.99] transition-transform cursor-pointer"
                 >
-                  {t(currentLang, 'stayBtn')}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13.5px] font-semibold text-emerald-300 flex items-center gap-1.5">
+                      <span>💰</span>
+                      <span>
+                        {currentLang === 'en'
+                          ? `Cash out ${hero.stack} chips & leave`
+                          : currentLang === 'it'
+                          ? `Incassa ${hero.stack} chip ed esci`
+                          : `Cobrar ${hero.stack} fichas y salir`}
+                      </span>
+                    </span>
+                    <span className="text-[11px] text-emerald-400 font-mono font-medium">
+                      +{hero.stack}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-emerald-400/80 mt-1">
+                    {hero.totalHandBet > 0
+                      ? currentLang === 'en'
+                        ? 'Folds current hand & credits remaining chips to total balance.'
+                        : currentLang === 'it'
+                        ? 'Lascia la mano e accredita le chip rimanenti al saldo totale.'
+                        : 'Se retira tu mano actual y tus fichas restantes regresan a tu saldo total.'
+                      : currentLang === 'en'
+                      ? 'Returns all your table chips to your total balance and vacates seat.'
+                      : currentLang === 'it'
+                      ? 'Restituisce tutte le tue chip al saldo totale e libera il posto.'
+                      : 'Tus fichas regresan directamente a tu saldo total y liberas tu asiento.'}
+                  </span>
                 </button>
+
+                {/* Option 2: Return to menu keeping seat */}
                 <button
                   type="button"
                   onClick={() => {
                     setIsLeaveConfirmOpen(false);
                     onBack(hero.stack, false);
                   }}
-                  className="w-full h-11 rounded-full bg-[#1e2028] border border-[#2e313d] text-white text-[13.5px] font-medium active:scale-95 transition-transform cursor-pointer"
+                  className="w-full rounded-[18px] bg-[#1e2028] border border-[#2e313d] p-3 flex flex-col text-left active:scale-[0.99] transition-transform cursor-pointer"
                 >
-                  {currentLang === 'en'
-                    ? 'Return to menu (keep seat & chips)'
-                    : currentLang === 'it'
-                    ? 'Torna al menu (mantieni posto e chip)'
-                    : 'Ir al menú (mantener asiento y fichas)'}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13.5px] font-semibold text-white flex items-center gap-1.5">
+                      <span>⏳</span>
+                      <span>
+                        {currentLang === 'en'
+                          ? 'Go to menu (keep seat & chips)'
+                          : currentLang === 'it'
+                          ? 'Vai al menu (mantieni posto)'
+                          : 'Ir al menú (mantener asiento)'}
+                      </span>
+                    </span>
+                    <span className="text-[11px] text-[#9ca3af] font-mono">
+                      {hero.stack} en mesa
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-[#9ca3af] mt-1">
+                    {currentLang === 'en'
+                      ? 'Your chips remain at the table. Rejoin anytime from Active Tables.'
+                      : currentLang === 'it'
+                      ? 'Le tue chip restano al tavolo. Rientra quando vuoi da Tavoli Attivi.'
+                      : 'Tus fichas se quedan aquí. Puedes volver cuando quieras desde Mesas Activas.'}
+                  </span>
                 </button>
+
+                {/* Option 3: Cancel / Keep Playing */}
                 <button
                   type="button"
-                  onClick={handleConfirmFoldAndLeave}
-                  className="w-full h-11 rounded-full bg-[#23252a] text-[#ef4444] text-[13.5px] font-semibold active:scale-95 transition-transform cursor-pointer"
+                  onClick={() => setIsLeaveConfirmOpen(false)}
+                  className="w-full h-10 rounded-full bg-[#141519] border border-[#23252a] text-[#7c7d85] hover:text-white text-[13px] font-medium active:scale-95 transition-all cursor-pointer"
                 >
-                  {t(currentLang, 'leaveConfirmBtn')} (Fold)
+                  {t(currentLang, 'stayBtn')}
                 </button>
               </div>
             </div>

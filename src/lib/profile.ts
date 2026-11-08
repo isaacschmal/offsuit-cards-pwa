@@ -349,9 +349,61 @@ export function returnTableStack(finalStack: number): UserProfilePreferences {
 }
 
 /**
- * Claims a 200-chip bankruptcy recovery bonus when player has 0 chips in their wallet.
+ * Calculates total chips the player currently has seated across all active tables.
+ */
+export function getPlayerActiveTablesChips(playerId?: string): number {
+  const targetId = playerId ?? loadUserProfile().playerId;
+  let total = 0;
+
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (
+          key &&
+          (key.startsWith('cartas_room_state_v5_') ||
+            key.startsWith('poker_room_state_'))
+        ) {
+          const raw = window.localStorage.getItem(key);
+          if (!raw) continue;
+          const state = JSON.parse(raw);
+          if (state && Array.isArray(state.players)) {
+            const hero = state.players.find(
+              (p: any) =>
+                p &&
+                (p.id === targetId || p.id === 'hero') &&
+                p.status !== 'out'
+            );
+            if (hero && typeof hero.stack === 'number' && hero.stack > 0) {
+              total += hero.stack;
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  } else if (
+    typeof globalThis !== 'undefined' &&
+    typeof (globalThis as any).__CARTAS_ACTIVE_TABLES_CHIPS__ === 'function'
+  ) {
+    total = (globalThis as any).__CARTAS_ACTIVE_TABLES_CHIPS__(targetId);
+  }
+
+  return total;
+}
+
+/**
+ * Claims a 200-chip bankruptcy recovery bonus ONLY when player is truly broke:
+ * 0 chips in wallet AND 0 chips across all active tables.
  */
 export function claimBankruptcyBonus(): UserProfilePreferences {
+  const current = loadUserProfile();
+  const activeChips = getPlayerActiveTablesChips(current.playerId);
+  if (current.bankroll > 0 || activeChips > 0) {
+    // Player is NOT broke! They have money in their wallet or on active tables.
+    return current;
+  }
   return updateUserProfile((prev) => ({
     ...prev,
     bankroll: prev.bankroll <= 0 ? 200 : prev.bankroll + 200,

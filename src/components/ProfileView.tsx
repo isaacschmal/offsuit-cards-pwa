@@ -1,5 +1,5 @@
 import { Check, Copy, Pencil, Plus, Settings, Share2, Trash2, Trophy, Users, X } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   getNotificationPermission,
   isPartyKitConfigured,
@@ -13,6 +13,7 @@ import {
   computePlaystyleMetrics,
   DEFAULT_USER_PROFILE,
   generateAccountSyncToken,
+  getPlayerActiveTablesChips,
   linkAccountById,
   type PlaystyleArchetype,
   restoreAccountFromSyncToken,
@@ -66,6 +67,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [copiedSyncLink, setCopiedSyncLink] = useState(false);
   const [linkInput, setLinkInput] = useState('');
   const [linkStatusMsg, setLinkStatusMsg] = useState<string | null>(null);
+
+  const activeTablesChips = useMemo(
+    () => getPlayerActiveTablesChips(profile.playerId),
+    [profile.playerId, profile.bankroll]
+  );
+  const totalBalance = profile.bankroll + activeTablesChips;
 
   const metrics = computePlaystyleMetrics(profile.stats);
   const hasPlayedHands = metrics.archetype !== null;
@@ -444,7 +451,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               Shrimp
             </span>
             <span className="text-[11px] text-[#7c7d85]">
-              Nivel {profile.level} · {profile.xp} XP · {profile.bankroll} fichas
+              Nivel {profile.level} · {profile.xp} XP · {totalBalance} fichas
             </span>
           </div>
           <div className="w-full h-[4.5px] rounded-full bg-[#25272f] overflow-hidden">
@@ -459,8 +466,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       </button>
 
-      {/* Bankruptcy Recovery Bonus in Profile */}
-      {profile.bankroll <= 0 && (
+      {/* Bankruptcy Recovery Bonus in Profile - ONLY if totalBalance <= 0 */}
+      {totalBalance <= 0 && (
         <div className="mt-2.5 p-3 rounded-[18px] bg-red-950/40 border border-red-500/30 flex items-center justify-between gap-3">
           <div className="flex flex-col text-left">
             <span className="text-[12.5px] font-semibold text-red-200">
