@@ -1,7 +1,8 @@
-import { Bell, Clock, Home, Plus, User, X, Zap } from 'lucide-react';
+import { Bell, Clock, Home, Plus, Trash2, User, X, Zap } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   createNewOpenRoom,
+  deleteOpenRoom,
   getNotificationPermission,
   loadOpenRooms,
   type OpenRoomInfo,
@@ -82,6 +83,12 @@ export const Lobby: React.FC<LobbyProps> = ({
   const liveRealRoomsCount = openRooms.filter(
     (r) => r.roomMode === 'real' && r.pacingMode === 'live'
   ).length;
+
+  const handleDeleteRoom = (code: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const updated = deleteOpenRoom(code);
+    setOpenRooms(updated);
+  };
 
   const handleCompleteWelcome = (e: React.FormEvent) => {
     e.preventDefault();
@@ -193,13 +200,13 @@ export const Lobby: React.FC<LobbyProps> = ({
         style={{
           paddingTop: 'max(env(safe-area-inset-top, 0px) + 10px, 14px)',
         }}
-        className="w-full sm:max-w-[480px] h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col justify-between px-4 relative"
+        className="w-full sm:max-w-[480px] h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col justify-between relative"
       >
         <div className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-2">
           {activeTab === 'home' ? (
-            <div className="flex flex-col">
+            <div className="flex flex-col w-full">
               {/* TOP BAR: Subtle Title + Player Name on Left + Orange Circular Level Progress Ring on Right */}
-              <div className="flex items-center justify-between h-10 shrink-0">
+              <div className="flex items-center justify-between h-10 px-5 shrink-0">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-400" />
                   <span className="text-[13.5px] font-medium text-[#9ca3af] tracking-tight">
@@ -246,15 +253,22 @@ export const Lobby: React.FC<LobbyProps> = ({
                 </button>
               </div>
 
-              {/* HERO COUNTER: Giant Ultra-Light XP Balance */}
-              <div className="my-3.5 flex flex-col items-center justify-center shrink-0">
-                <span className="font-extralight text-[62px] tracking-tight leading-none text-white">
+              {/* HERO COUNTER: Giant Ultra-Light XP Balance (Left-aligned like 516 in image.png) */}
+              <div className="my-3.5 px-5 flex items-center justify-start text-left shrink-0">
+                <span className="font-extralight text-[64px] tracking-tight leading-none text-white">
                   {profile.xp}
                 </span>
               </div>
 
-              {/* HORIZONTAL PASTEL GRADIENT CARDS CAROUSEL (Strictly separated Real vs Bots) */}
-              <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1.5 snap-x snap-mandatory shrink-0">
+              {/* HORIZONTAL PASTEL GRADIENT CARDS CAROUSEL (Edge-to-Edge Full Bleed, Never Clipped at 16px) */}
+              <div
+                style={{
+                  paddingLeft: '20px',
+                  paddingRight: '20px',
+                  scrollPaddingLeft: '20px',
+                }}
+                className="w-full flex gap-3.5 overflow-x-auto no-scrollbar pb-2 snap-x snap-mandatory shrink-0"
+              >
                 {/* Card 1: Mesas en Vivo (Solo Reales · Sin Bots) */}
                 <button
                   type="button"
@@ -276,40 +290,35 @@ export const Lobby: React.FC<LobbyProps> = ({
                     }
                   }}
                   style={{
+                    padding: '24px',
                     background:
                       'linear-gradient(135deg, #dce7ff 0%, #d8f3dc 100%)',
                   }}
-                  className="snap-start shrink-0 min-w-[262px] h-[174px] rounded-[26px] p-4 flex flex-col justify-between text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
+                  className="snap-start shrink-0 min-w-[295px] w-[295px] h-[205px] rounded-[28px] flex flex-col justify-between items-start text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
                 >
                   <div className="flex items-start justify-between w-full">
-                    <div>
-                      <span className="inline-block text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1">
-                        👥 Solo Reales · En Vivo
-                      </span>
-                      <h2 className="text-[20px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                        Mesas en Vivo
-                      </h2>
-                      <p className="text-[12.5px] text-[#334155] mt-0.5 leading-snug max-w-[188px]">
-                        Juega con amigos reales conectados (sin bots)
-                      </p>
-                    </div>
-                    <span className="text-[24px] leading-none">🌎</span>
-                  </div>
-
-                  <div className="flex items-center justify-between w-full pt-1">
-                    <span className="text-[11.5px] font-medium text-[#334155]">
+                    <span className="text-[48px] leading-none select-none">
+                      🌎
+                    </span>
+                    <span
+                      style={{ padding: '4px 10px' }}
+                      className="inline-block text-[11px] font-semibold rounded-full bg-[#0f172a]/10 text-[#0f172a]"
+                    >
                       {liveRealRoomsCount > 0
                         ? `${liveRealRoomsCount} ${
-                            liveRealRoomsCount === 1
-                              ? 'sala abierta'
-                              : 'salas abiertas'
-                          }`
-                        : 'Crea o únete con código'}
+                            liveRealRoomsCount === 1 ? 'sala' : 'salas'
+                          } · En Vivo`
+                        : 'Solo Reales · En Vivo'}
                     </span>
+                  </div>
 
-                    <span className="h-7 px-3 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[11.5px] font-semibold flex items-center">
-                      {liveRealRoomsCount > 0 ? 'Jugar →' : 'Abrir →'}
-                    </span>
+                  <div className="flex flex-col items-start text-left w-full">
+                    <h2 className="text-[24px] font-semibold tracking-tight text-[#0f172a] leading-tight">
+                      Mesas en Vivo
+                    </h2>
+                    <p className="text-[13.5px] text-[#334155] font-normal mt-1 leading-snug">
+                      Juega con amigos reales conectados (sin bots)
+                    </p>
                   </div>
                 </button>
 
@@ -334,33 +343,31 @@ export const Lobby: React.FC<LobbyProps> = ({
                     }
                   }}
                   style={{
+                    padding: '24px',
                     background:
                       'linear-gradient(135deg, #e0e7ff 0%, #fce7f3 100%)',
                   }}
-                  className="snap-start shrink-0 min-w-[262px] h-[174px] rounded-[26px] p-4 flex flex-col justify-between text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
+                  className="snap-start shrink-0 min-w-[295px] w-[295px] h-[205px] rounded-[28px] flex flex-col justify-between items-start text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
                 >
                   <div className="flex items-start justify-between w-full">
-                    <div>
-                      <span className="inline-block text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1">
-                        👥 Solo Reales · 24h
-                      </span>
-                      <h2 className="text-[20px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                        Por Turnos
-                      </h2>
-                      <p className="text-[12.5px] text-[#334155] mt-0.5 leading-snug max-w-[188px]">
-                        Sin prisa entre amigos, te avisa cuando te toca
-                      </p>
-                    </div>
-                    <span className="text-[24px] leading-none">⏳</span>
+                    <span className="text-[48px] leading-none select-none">
+                      ⏳
+                    </span>
+                    <span
+                      style={{ padding: '4px 10px' }}
+                      className="inline-block text-[11px] font-semibold rounded-full bg-[#0f172a]/10 text-[#0f172a]"
+                    >
+                      Solo Reales · 24h
+                    </span>
                   </div>
 
-                  <div className="flex items-center justify-between w-full pt-1">
-                    <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-[#334155]">
-                      <span>Estilo ajedrez · Sin bots</span>
-                    </div>
-                    <span className="h-7 px-3 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[11.5px] font-semibold flex items-center">
-                      Entrar →
-                    </span>
+                  <div className="flex flex-col items-start text-left w-full">
+                    <h2 className="text-[24px] font-semibold tracking-tight text-[#0f172a] leading-tight">
+                      Por Turnos
+                    </h2>
+                    <p className="text-[13.5px] text-[#334155] font-normal mt-1 leading-snug">
+                      Sin prisa entre amigos, te avisa cuando te toca
+                    </p>
                   </div>
                 </button>
 
@@ -371,177 +378,188 @@ export const Lobby: React.FC<LobbyProps> = ({
                     onStartInstantTable();
                   }}
                   style={{
+                    padding: '24px',
                     background:
                       'linear-gradient(135deg, #fef3c7 0%, #ffedd5 100%)',
                   }}
-                  className="snap-start shrink-0 min-w-[262px] h-[174px] rounded-[26px] p-4 flex flex-col justify-between text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
+                  className="snap-start shrink-0 min-w-[295px] w-[295px] h-[205px] rounded-[28px] flex flex-col justify-between items-start text-left text-[#0f172a] shadow-lg active:scale-[0.99] transition-transform cursor-pointer"
                 >
                   <div className="flex items-start justify-between w-full">
-                    <div>
-                      <span className="inline-block text-[10.5px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1">
-                        🤖 Modo Bots
-                      </span>
-                      <h2 className="text-[20px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                        Práctica vs Bots
-                      </h2>
-                      <p className="text-[12.5px] text-[#334155] mt-0.5 leading-snug max-w-[188px]">
-                        Entrena jugadas al instante contra los 5 bots IA
-                      </p>
-                    </div>
-                    <span className="text-[24px] leading-none">🤖</span>
+                    <span className="text-[48px] leading-none select-none">
+                      🤖
+                    </span>
+                    <span
+                      style={{ padding: '4px 10px' }}
+                      className="inline-block text-[11px] font-semibold rounded-full bg-[#0f172a]/10 text-[#0f172a]"
+                    >
+                      5 Bots IA
+                    </span>
                   </div>
 
-                  <div className="flex items-center justify-between w-full pt-1">
-                    <span className="text-[11.5px] font-medium text-[#334155]">
-                      5 Bots IA · Turnos rápidos
-                    </span>
-                    <span className="h-7 px-3 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[11.5px] font-semibold flex items-center">
-                      Practicar →
-                    </span>
+                  <div className="flex flex-col items-start text-left w-full">
+                    <h2 className="text-[24px] font-semibold tracking-tight text-[#0f172a] leading-tight">
+                      Práctica vs Bots
+                    </h2>
+                    <p className="text-[13.5px] text-[#334155] font-normal mt-1 leading-snug">
+                      Entrena jugadas al instante contra los 5 bots IA
+                    </p>
                   </div>
                 </button>
               </div>
 
               {/* ACTIVE OPEN ROOM QUICK BANNER OR EMPTY STATE */}
-              {primaryOpenRoom ? (
-                <div className="mt-2.5 bg-[#121316] border border-[#23252a] rounded-[18px] px-3.5 py-2.5 flex items-center justify-between gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setIsRoomsModalOpen(true)}
-                    className="flex flex-col text-left min-w-0 cursor-pointer"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[12.5px] font-medium text-white truncate">
-                        {primaryOpenRoom.name}
-                      </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-medium shrink-0">
-                        {primaryOpenRoom.roomMode === 'bots'
-                          ? '🤖 Bots'
-                          : '👥 Solo Reales'}
-                      </span>
-                    </div>
-                    <span className="text-[11px] text-[#7c7d85] mt-0.5">
-                      #{primaryOpenRoom.code} · {primaryOpenRoom.playerCount}/
-                      {primaryOpenRoom.maxPlayers} · Ver salas ({openRooms.length})
-                    </span>
-                  </button>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
+              <div className="px-5">
+                {primaryOpenRoom ? (
+                  <div className="mt-2.5 bg-[#121316] border border-[#23252a] rounded-[18px] px-3.5 py-2.5 flex items-center justify-between gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={() => setIsRoomsModalOpen(true)}
-                      className="h-7 px-2.5 rounded-full bg-[#23252a] text-white text-[11.5px] font-medium active:scale-95 transition-transform cursor-pointer"
+                      className="flex flex-col text-left min-w-0 cursor-pointer"
                     >
-                      Salas
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[12.5px] font-medium text-white truncate">
+                          {primaryOpenRoom.name}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-medium shrink-0">
+                          {primaryOpenRoom.roomMode === 'bots'
+                            ? '🤖 Bots'
+                            : '👥 Solo Reales'}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-[#7c7d85] mt-0.5">
+                        #{primaryOpenRoom.code} · {primaryOpenRoom.playerCount}/
+                        {primaryOpenRoom.maxPlayers} · Ver salas ({openRooms.length})
+                      </span>
                     </button>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteRoom(primaryOpenRoom.code, e)}
+                        aria-label={`Eliminar sala ${primaryOpenRoom.code}`}
+                        title="Eliminar sala"
+                        className="w-7 h-7 rounded-full bg-[#23252a] text-[#9ca3af] hover:text-[#ef4444] flex items-center justify-center active:scale-95 transition-all cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsRoomsModalOpen(true)}
+                        className="h-7 px-2.5 rounded-full bg-[#23252a] text-white text-[11.5px] font-medium active:scale-95 transition-transform cursor-pointer"
+                      >
+                        Salas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onJoinOrCreateRoom(
+                            primaryOpenRoom.code,
+                            primaryOpenRoom.pacingMode,
+                            primaryOpenRoom.name,
+                            primaryOpenRoom.roomMode
+                          )
+                        }
+                        className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-semibold active:scale-95 transition-transform cursor-pointer"
+                      >
+                        Unirse
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-2.5 bg-[#121316] border border-[#23252a] rounded-[18px] px-3.5 py-2.5 flex items-center justify-between gap-3 shrink-0">
+                    <div className="flex flex-col text-left">
+                      <span className="text-[12px] font-medium text-white leading-snug">
+                        No hay salas abiertas en este momento
+                      </span>
+                      <span className="text-[10.5px] text-[#7c7d85] mt-0.5">
+                        Crea una sala y comparte el código con tus amigos
+                      </span>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={() =>
-                        onJoinOrCreateRoom(
-                          primaryOpenRoom.code,
-                          primaryOpenRoom.pacingMode,
-                          primaryOpenRoom.name,
-                          primaryOpenRoom.roomMode
-                        )
-                      }
-                      className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-semibold active:scale-95 transition-transform cursor-pointer"
+                      onClick={() => setIsRoomsModalOpen(true)}
+                      className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-semibold shrink-0 active:scale-95 transition-transform cursor-pointer"
                     >
-                      Unirse
+                      Crear Sala
                     </button>
                   </div>
-                </div>
-              ) : (
-                <div className="mt-2.5 bg-[#121316] border border-[#23252a] rounded-[18px] px-3.5 py-2.5 flex items-center justify-between gap-3 shrink-0">
-                  <div className="flex flex-col text-left">
-                    <span className="text-[12px] font-medium text-white leading-snug">
-                      No hay salas abiertas en este momento
-                    </span>
-                    <span className="text-[10.5px] text-[#7c7d85] mt-0.5">
-                      Crea una sala y comparte el código con tus amigos
-                    </span>
+                )}
+
+                {/* WEEKLY LEADERBOARD SECTION (Strictly real players) */}
+                <div className="mt-4">
+                  <div className="flex items-center justify-between px-1 mb-2">
+                    <h3 className="text-[16px] font-medium text-white tracking-tight">
+                      Weekly leaderboard
+                    </h3>
+                    <div className="flex items-center gap-1 text-[14px] font-medium text-[#9ca3af]">
+                      <span>{leaderboardEntries.length}</span>
+                      <span>🏆</span>
+                    </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setIsRoomsModalOpen(true)}
-                    className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-semibold shrink-0 active:scale-95 transition-transform cursor-pointer"
-                  >
-                    Crear Sala
-                  </button>
-                </div>
-              )}
-
-              {/* WEEKLY LEADERBOARD SECTION (Strictly real players) */}
-              <div className="mt-4">
-                <div className="flex items-center justify-between px-1 mb-2">
-                  <h3 className="text-[16px] font-medium text-white tracking-tight">
-                    Weekly leaderboard
-                  </h3>
-                  <div className="flex items-center gap-1 text-[14px] font-medium text-[#9ca3af]">
-                    <span>{leaderboardEntries.length}</span>
-                    <span>🏆</span>
-                  </div>
-                </div>
-
-                <div className="bg-[#121316] border border-[#1d1f26] rounded-[20px] p-2 flex flex-col gap-1">
-                  {leaderboardEntries.map((entry) => (
-                    <div
-                      key={`${entry.rank}-${entry.name}`}
-                      className={`flex items-center justify-between px-2.5 py-2 rounded-[14px] ${
-                        entry.isHero ? 'bg-white/[0.04]' : ''
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-10 flex items-center gap-1 text-[13px] font-medium text-[#9ca3af]">
-                          {entry.medal ? (
-                            <>
-                              <span className="text-[15px] leading-none">
-                                {entry.medal}
-                              </span>
-                              <span className="text-white font-semibold">
+                  <div className="bg-[#121316] border border-[#1d1f26] rounded-[20px] p-2 flex flex-col gap-1">
+                    {leaderboardEntries.map((entry) => (
+                      <div
+                        key={`${entry.rank}-${entry.name}`}
+                        className={`flex items-center justify-between px-2.5 py-2 rounded-[14px] ${
+                          entry.isHero ? 'bg-white/[0.04]' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-10 flex items-center gap-1 text-[13px] font-medium text-[#9ca3af]">
+                            {entry.medal ? (
+                              <>
+                                <span className="text-[15px] leading-none">
+                                  {entry.medal}
+                                </span>
+                                <span className="text-white font-semibold">
+                                  {entry.rank}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="pl-5 text-[#7c7d85]">
                                 {entry.rank}
                               </span>
-                            </>
-                          ) : (
-                            <span className="pl-5 text-[#7c7d85]">
-                              {entry.rank}
-                            </span>
-                          )}
-                        </div>
+                            )}
+                          </div>
 
-                        <div className="relative w-7 h-7 rounded-full bg-[#1c1e24] flex items-center justify-center">
-                          <Avatar3D avatarId={entry.avatarId} size={26} />
-                          <span className="absolute -bottom-1 -right-1 text-[10px] leading-none">
-                            {entry.badgeEmoji}
+                          <div className="relative w-7 h-7 rounded-full bg-[#1c1e24] flex items-center justify-center">
+                            <Avatar3D avatarId={entry.avatarId} size={26} />
+                            <span className="absolute -bottom-1 -right-1 text-[10px] leading-none">
+                              {entry.badgeEmoji}
+                            </span>
+                          </div>
+
+                          <span className="text-[14px] font-medium text-white">
+                            {entry.name}
                           </span>
                         </div>
 
-                        <span className="text-[14px] font-medium text-white">
-                          {entry.name}
+                        <span className="text-[13px] font-normal text-[#8e9099]">
+                          {entry.xpLabel}
                         </span>
                       </div>
+                    ))}
 
-                      <span className="text-[13px] font-normal text-[#8e9099]">
-                        {entry.xpLabel}
-                      </span>
-                    </div>
-                  ))}
-
-                  {leaderboardEntries.length === 1 && (
-                    <div className="px-2 py-1.5 text-[10.5px] text-[#7c7d85] text-center border-t border-[#1d1f26] mt-0.5">
-                      Solo tú estás registrado por ahora · Invita amigos a una sala para competir en el ranking
-                    </div>
-                  )}
+                    {leaderboardEntries.length === 1 && (
+                      <div className="px-2 py-1.5 text-[10.5px] text-[#7c7d85] text-center border-t border-[#1d1f26] mt-0.5">
+                        Solo tú estás registrado por ahora · Invita amigos a una sala para competir en el ranking
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           ) : (
-            <ProfileView
-              profile={profile}
-              activeRoomCode={activeRoomCode}
-              onProfileChange={setProfile}
-              onOpenCreateOrInviteModal={() => setIsRoomsModalOpen(true)}
-            />
+            <div className="px-5">
+              <ProfileView
+                profile={profile}
+                activeRoomCode={activeRoomCode}
+                onProfileChange={setProfile}
+                onOpenCreateOrInviteModal={() => setIsRoomsModalOpen(true)}
+              />
+            </div>
           )}
         </div>
 
@@ -655,7 +673,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                     Salas Abiertas &amp; Crear Mesa
                   </h3>
                   <p className="text-[12px] text-[#7c7d85]">
-                    Mesas reales con amigos o práctica con bots
+                    Las salas en vivo expiran tras 2h sin actividad (7d por turnos)
                   </p>
                 </div>
                 <button
@@ -676,23 +694,25 @@ export const Lobby: React.FC<LobbyProps> = ({
               ) : (
                 <div className="flex flex-col gap-2">
                   {openRooms.map((room) => (
-                    <button
+                    <div
                       key={room.code}
-                      type="button"
-                      onClick={() => {
-                        setIsRoomsModalOpen(false);
-                        onJoinOrCreateRoom(
-                          room.code,
-                          room.pacingMode,
-                          room.name,
-                          room.roomMode
-                        );
-                      }}
-                      className="w-full rounded-[18px] px-3.5 py-3 bg-black/50 border border-[#23252a] hover:border-white/30 flex items-center justify-between text-left cursor-pointer"
+                      className="w-full rounded-[18px] px-3.5 py-3 bg-black/50 border border-[#23252a] hover:border-white/30 flex items-center justify-between gap-2 text-left"
                     >
-                      <div className="flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsRoomsModalOpen(false);
+                          onJoinOrCreateRoom(
+                            room.code,
+                            room.pacingMode,
+                            room.name,
+                            room.roomMode
+                          );
+                        }}
+                        className="flex-1 flex flex-col text-left min-w-0 cursor-pointer"
+                      >
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[14px] font-medium text-white">
+                          <span className="text-[14px] font-medium text-white truncate">
                             {room.name}
                           </span>
                           <span
@@ -722,12 +742,35 @@ export const Lobby: React.FC<LobbyProps> = ({
                           #{room.code} · {room.playerCount}/{room.maxPlayers}{' '}
                           jugadores · Ciegas {room.blindsLabel}
                         </span>
-                      </div>
+                      </button>
 
-                      <span className="h-7 px-3 rounded-full bg-white text-black text-[12px] font-semibold flex items-center shrink-0">
-                        Unirse
-                      </span>
-                    </button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteRoom(room.code, e)}
+                          aria-label={`Eliminar sala ${room.code}`}
+                          title="Eliminar sala"
+                          className="w-7 h-7 rounded-full bg-[#23252a] text-[#9ca3af] hover:text-[#ef4444] flex items-center justify-center active:scale-95 transition-all cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsRoomsModalOpen(false);
+                            onJoinOrCreateRoom(
+                              room.code,
+                              room.pacingMode,
+                              room.name,
+                              room.roomMode
+                            );
+                          }}
+                          className="h-7 px-3 rounded-full bg-white text-black text-[12px] font-semibold flex items-center shrink-0 active:scale-95 transition-transform cursor-pointer"
+                        >
+                          Unirse
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}

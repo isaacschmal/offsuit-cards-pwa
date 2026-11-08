@@ -343,4 +343,47 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
     expect(folded.street).toBe('showdown');
     expect(folded.winnerIds).toContain('p_2');
   });
+
+  it('auto-expires live rooms after 2h, async rooms after 7d, and supports manual deleteOpenRoom', async () => {
+    const {
+      ASYNC_ROOM_TTL_MS,
+      LIVE_ROOM_TTL_MS,
+      createNewOpenRoom,
+      deleteOpenRoom,
+      isRoomExpired,
+      loadOpenRooms,
+      mergeOpenRoomsList,
+    } = await import('../../../lib/multiplayer');
+
+    expect(LIVE_ROOM_TTL_MS).toBe(2 * 60 * 60 * 1000);
+    expect(ASYNC_ROOM_TTL_MS).toBe(7 * 24 * 60 * 60 * 1000);
+
+    const now = Date.now();
+    const liveRoom = createNewOpenRoom('Mesa En Vivo', 'live', 'LIVE1', 'real');
+    const asyncRoom = createNewOpenRoom('Mesa Turnos', 'async', 'ASYNC1', 'real');
+
+    expect(isRoomExpired(liveRoom, now + LIVE_ROOM_TTL_MS - 1000)).toBe(false);
+    expect(isRoomExpired(liveRoom, now + LIVE_ROOM_TTL_MS + 1000)).toBe(true);
+
+    expect(isRoomExpired(asyncRoom, now + LIVE_ROOM_TTL_MS + 1000)).toBe(false);
+    expect(isRoomExpired(asyncRoom, now + ASYNC_ROOM_TTL_MS + 1000)).toBe(true);
+
+    // Manual deletion removes room and prevents stale directory sync from resurrecting it
+    const afterDelete = deleteOpenRoom('LIVE1');
+    expect(afterDelete.some((r) => r.code === 'LIVE1')).toBe(false);
+    expect(loadOpenRooms().some((r) => r.code === 'LIVE1')).toBe(false);
+
+    const mergedWithStale = mergeOpenRoomsList(loadOpenRooms(), [liveRoom]);
+    expect(mergedWithStale.some((r) => r.code === 'LIVE1')).toBe(false);
+  });
+
+  it('triggers iOS switch haptics and vibration cleanly via triggerHaptic', async () => {
+    const { initGlobalHaptics, triggerHaptic } = await import('../../../lib/haptics');
+    expect(() => {
+      initGlobalHaptics();
+      triggerHaptic('light');
+      triggerHaptic('selection');
+    }).not.toThrow();
+  });
 });
+

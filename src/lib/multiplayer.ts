@@ -281,7 +281,7 @@ export function connectMqttTopics(
   return {
     publish: (topic: string, data: unknown, retain = false) => {
       if (closed) return;
-      const json = JSON.stringify(data);
+      const json = data === null ? '' : JSON.stringify(data);
       for (const client of activeClients) {
         if (client.ws.readyState === WebSocket.OPEN && client.isReady) {
           try {
@@ -338,9 +338,67 @@ export function shouldAcceptIncomingState(
 
 export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [];
 
-export function loadOpenRooms(): OpenRoomInfo[] {
+export const LIVE_ROOM_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours for live rooms
+export const ASYNC_ROOM_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days for turn-based async rooms
+const DELETED_ROOMS_STORAGE_KEY = 'cartas_deleted_rooms_v5';
+
+let memoryOpenRooms: OpenRoomInfo[] = [];
+let memoryDeletedRooms: Record<string, number> = {};
+
+export function isRoomExpired(room: OpenRoomInfo, now = Date.now()): boolean {
+  if (!room || typeof room.updatedAt !== 'number') return true;
+  const ttl = room.pacingMode === 'async' ? ASYNC_ROOM_TTL_MS : LIVE_ROOM_TTL_MS;
+  return now - room.updatedAt > ttl;
+}
+
+function loadDeletedRoomsMap(): Record<string, number> {
   if (typeof window === 'undefined' || !window.localStorage) {
-    return DEFAULT_OPEN_ROOMS;
+    return { ...memoryDeletedRooms };
+  }
+  try {
+    const raw = window.localStorage.getItem(DELETED_ROOMS_STORAGE_KEY);
+    if (!raw) return { ...memoryDeletedRooms };
+    const parsed = JSON.parse(raw) as Record<string, number>;
+    return parsed && typeof parsed === 'object'
+      ? { ...memoryDeletedRooms, ...parsed }
+      : { ...memoryDeletedRooms };
+  } catch {
+    return { ...memoryDeletedRooms };
+  }
+}
+
+function recordDeletedRoomTimestamp(code: string, timestamp = Date.now()): void {
+  const key = code.toUpperCase();
+  memoryDeletedRooms[key] = timestamp;
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    const map = loadDeletedRoomsMap();
+    map[key] = timestamp;
+    window.localStorage.setItem(DELETED_ROOMS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function clearDeletedRoomTimestamp(code: string): void {
+  const key = code.toUpperCase();
+  delete memoryDeletedRooms[key];
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    const map = loadDeletedRoomsMap();
+    if (key in map) {
+      delete map[key];
+      window.localStorage.setItem(DELETED_ROOMS_STORAGE_KEY, JSON.stringify(map));
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function loadOpenRooms(now = Date.now()): OpenRoomInfo[] {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    memoryOpenRooms = memoryOpenRooms.filter((r) => !isRoomExpired(r, now));
+    return [...memoryOpenRooms];
   }
   try {
     const raw = window.localStorage.getItem(ROOMS_STORAGE_KEY);
@@ -351,16 +409,31 @@ export function loadOpenRooms(): OpenRoomInfo[] {
     if (!Array.isArray(parsed)) {
       return DEFAULT_OPEN_ROOMS;
     }
-    return parsed.map((r) => ({
+    const normalized = parsed.map((r) => ({
       ...r,
       roomMode: r.roomMode ?? (r.code === 'BOTS' ? 'bots' : 'real'),
     }));
+    const valid = normalized.filter((r) => !isRoomExpired(r, now));
+    if (valid.length !== normalized.length) {
+      for (const r of normalized) {
+        if (isRoomExpired(r, now)) {
+          try {
+            window.localStorage.removeItem(`${ROOM_STATE_PREFIX}${r.code.toUpperCase()}`);
+          } catch {
+            // ignore
+          }
+        }
+      }
+      saveOpenRooms(valid);
+    }
+    return valid;
   } catch {
     return DEFAULT_OPEN_ROOMS;
   }
 }
 
 export function saveOpenRooms(rooms: OpenRoomInfo[]): void {
+  memoryOpenRooms = [...rooms];
   if (typeof window === 'undefined' || !window.localStorage) return;
   try {
     window.localStorage.setItem(ROOMS_STORAGE_KEY, JSON.stringify(rooms));
@@ -371,18 +444,30 @@ export function saveOpenRooms(rooms: OpenRoomInfo[]): void {
 
 export function mergeOpenRoomsList(
   localRooms: OpenRoomInfo[],
-  incomingRooms: OpenRoomInfo[]
+  incomingRooms: OpenRoomInfo[],
+  now = Date.now()
 ): OpenRoomInfo[] {
+  const deletedMap = loadDeletedRoomsMap();
   const map = new Map<string, OpenRoomInfo>();
   for (const r of localRooms) {
+    if (isRoomExpired(r, now)) continue;
     map.set(r.code.toUpperCase(), r);
   }
   for (const inc of incomingRooms) {
     if (!inc?.code) continue;
+    if (isRoomExpired(inc, now)) continue;
     const key = inc.code.toUpperCase();
+    const deletedAt = deletedMap[key];
+    if (deletedAt && (inc.updatedAt ?? 0) <= deletedAt) {
+      continue;
+    }
     const existing = map.get(key);
     if (!existing || (inc.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
-      map.set(key, { ...inc, code: key });
+      map.set(key, {
+        ...inc,
+        code: key,
+        roomMode: inc.roomMode ?? (key === 'BOTS' ? 'bots' : 'real'),
+      });
     }
   }
   return Array.from(map.values()).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -391,6 +476,7 @@ export function mergeOpenRoomsList(
 export function upsertOpenRoom(room: OpenRoomInfo): OpenRoomInfo[] {
   const existing = loadOpenRooms();
   const normalizedCode = room.code.trim().toUpperCase();
+  clearDeletedRoomTimestamp(normalizedCode);
   const idx = existing.findIndex((r) => r.code === normalizedCode);
   let updated: OpenRoomInfo[];
 
@@ -403,6 +489,27 @@ export function upsertOpenRoom(room: OpenRoomInfo): OpenRoomInfo[] {
 
   saveOpenRooms(updated);
   broadcastDirectoryUpdate(updated);
+  return updated;
+}
+
+export function deleteOpenRoom(roomCode: string): OpenRoomInfo[] {
+  const normalized = roomCode.trim().toUpperCase();
+  recordDeletedRoomTimestamp(normalized, Date.now());
+  const existing = loadOpenRooms();
+  const updated = existing.filter((r) => r.code !== normalized);
+  saveOpenRooms(updated);
+
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.removeItem(`${ROOM_STATE_PREFIX}${normalized}`);
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  const stateTopic = `cartas/v5/room/${normalized}/state`;
+  sharedLobbyMqtt?.publish(stateTopic, null, true);
+  broadcastDirectoryUpdate(updated, normalized);
   return updated;
 }
 
@@ -517,18 +624,22 @@ export function getOrInitRoomState(
 const LOBBY_MQTT_TOPIC = 'cartas/v5/lobby/directory';
 let sharedLobbyMqtt: MqttSubscriptionHandle | null = null;
 
-function broadcastDirectoryUpdate(rooms: OpenRoomInfo[]): void {
+function broadcastDirectoryUpdate(rooms: OpenRoomInfo[], deletedCode?: string): void {
   if (typeof BroadcastChannel !== 'undefined') {
     try {
       const bc = new BroadcastChannel('cartas-rooms-directory');
-      bc.postMessage({ type: 'directory_sync', rooms });
+      bc.postMessage({ type: 'directory_sync', rooms, deletedCode });
       bc.close();
     } catch {
       // ignore
     }
   }
 
-  sharedLobbyMqtt?.publish(LOBBY_MQTT_TOPIC, { type: 'directory_sync', rooms }, true);
+  sharedLobbyMqtt?.publish(
+    LOBBY_MQTT_TOPIC,
+    { type: 'directory_sync', rooms, deletedCode },
+    true
+  );
 
   // PartyKit Cloudflare zero-cost WebSocket directory broadcast
   const wsUrl = getPartyKitWebSocketUrl('lobby');
@@ -536,7 +647,7 @@ function broadcastDirectoryUpdate(rooms: OpenRoomInfo[]): void {
     try {
       const ws = new WebSocket(wsUrl);
       ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'directory_sync', rooms }));
+        ws.send(JSON.stringify({ type: 'directory_sync', rooms, deletedCode }));
         setTimeout(() => ws.close(), 250);
       };
     } catch {
@@ -551,7 +662,7 @@ function broadcastDirectoryUpdate(rooms: OpenRoomInfo[]): void {
         channel.send({
           type: 'broadcast',
           event: 'directory_sync',
-          payload: { rooms },
+          payload: { rooms, deletedCode },
         });
       }
     });
@@ -561,6 +672,18 @@ function broadcastDirectoryUpdate(rooms: OpenRoomInfo[]): void {
 export function subscribeToOpenRoomsDirectory(
   onRoomsUpdated: (rooms: OpenRoomInfo[]) => void
 ): () => void {
+  const applyRemoteSync = (rooms: OpenRoomInfo[], deletedCode?: string) => {
+    if (deletedCode) {
+      recordDeletedRoomTimestamp(deletedCode, Date.now());
+    }
+    const currentLocal = loadOpenRooms().filter(
+      (r) => !deletedCode || r.code !== deletedCode.toUpperCase()
+    );
+    const merged = mergeOpenRoomsList(currentLocal, rooms);
+    saveOpenRooms(merged);
+    onRoomsUpdated(merged);
+  };
+
   const bc =
     typeof BroadcastChannel !== 'undefined'
       ? new BroadcastChannel('cartas-rooms-directory')
@@ -569,19 +692,19 @@ export function subscribeToOpenRoomsDirectory(
   if (bc) {
     bc.onmessage = (ev) => {
       if (ev.data?.type === 'directory_sync' && Array.isArray(ev.data.rooms)) {
-        const merged = mergeOpenRoomsList(loadOpenRooms(), ev.data.rooms);
-        saveOpenRooms(merged);
-        onRoomsUpdated(merged);
+        applyRemoteSync(ev.data.rooms, ev.data.deletedCode);
       }
     };
   }
 
   const mqttHandle = connectMqttTopics([LOBBY_MQTT_TOPIC], (_topic, data) => {
-    const payload = data as { type?: string; rooms?: OpenRoomInfo[] };
+    const payload = data as {
+      type?: string;
+      rooms?: OpenRoomInfo[];
+      deletedCode?: string;
+    };
     if (payload?.type === 'directory_sync' && Array.isArray(payload.rooms)) {
-      const merged = mergeOpenRoomsList(loadOpenRooms(), payload.rooms);
-      saveOpenRooms(merged);
-      onRoomsUpdated(merged);
+      applyRemoteSync(payload.rooms, payload.deletedCode);
     }
   });
   sharedLobbyMqtt = mqttHandle;
@@ -596,11 +719,10 @@ export function subscribeToOpenRoomsDirectory(
           const data = JSON.parse(String(ev.data)) as {
             type?: string;
             rooms?: OpenRoomInfo[];
+            deletedCode?: string;
           };
           if (data.type === 'directory_sync' && Array.isArray(data.rooms)) {
-            const merged = mergeOpenRoomsList(loadOpenRooms(), data.rooms);
-            saveOpenRooms(merged);
-            onRoomsUpdated(merged);
+            applyRemoteSync(data.rooms, data.deletedCode);
           }
         } catch {
           // ignore

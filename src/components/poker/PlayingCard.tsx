@@ -2,6 +2,7 @@ import { motion, type PanInfo } from 'framer-motion';
 import React, { useEffect, useState } from 'react';
 import { formatRank, isRedSuit } from '../../engine/deck';
 import type { Card, Suit } from '../../engine/types';
+import { triggerHaptic } from '../../lib/haptics';
 import {
   CARD_BACK_THEMES,
   type CardBackColorId,
@@ -301,6 +302,7 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
   const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (!dragEnabled) return;
     if (info.offset.y < -65 || info.velocity.y < -350) {
+      triggerHaptic('medium');
       setIsThrown(true);
       window.setTimeout(() => {
         onFoldTrigger?.();

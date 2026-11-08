@@ -19,6 +19,7 @@ import {
   type RoomPacingMode,
   savePersistedRoomState,
 } from '../../lib/multiplayer';
+import { triggerHaptic } from '../../lib/haptics';
 import {
   loadUserProfile,
   recordHandCompletedStats,
@@ -203,6 +204,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
   // Safe Back Button handler with Stack / Money Protection
   const handleBackButtonClick = () => {
+    triggerHaptic('light');
     const hasActiveChipsInPot =
       seatedCount >= 2 &&
       tableState.street !== 'showdown' &&
@@ -220,6 +222,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   };
 
   const handleConfirmFoldAndLeave = () => {
+    triggerHaptic('medium');
     recordPlayerActionStats({ type: 'fold' });
     const foldedState = forceFoldPlayerForLeave(tableState, hero.id);
     if (foldedState.street === 'showdown') {
@@ -237,6 +240,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
   const handleHeroAction = (action: PlayerActionInput) => {
     if (!isHeroTurn) return;
+    triggerHaptic(action.type === 'raise' ? 'medium' : 'light');
     recordPlayerActionStats(action);
     const next = applyPlayerAction(tableState, hero.id, action);
     if (next.street === 'showdown') {
@@ -253,6 +257,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   };
 
   const handlePresetSelect = (preset: '1bb' | 'half-pot' | 'pot') => {
+    triggerHaptic('selection');
     const totalPot = getTotalPot(tableState);
     let target = minRaiseBet;
     if (preset === '1bb') {
@@ -272,6 +277,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   };
 
   const handleDealNextHand = () => {
+    triggerHaptic('light');
     const next = startNewHand(tableState, false);
     setTableState(next);
     savePersistedRoomState(next.roomId, next);
@@ -290,8 +296,10 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     swipeStartRef.current = null;
 
     if (deltaY < -18 || deltaX < -20) {
+      triggerHaptic('selection');
       setHudOddsMode(true);
     } else if (deltaY > 18 || deltaX > 20) {
+      triggerHaptic('selection');
       setHudOddsMode(false);
     }
   };
@@ -312,8 +320,10 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     swipeStartRef.current = null;
 
     if (deltaY < -18 || deltaX < -20) {
+      triggerHaptic('selection');
       setHudOddsMode(true);
     } else if (deltaY > 18 || deltaX > 20) {
+      triggerHaptic('selection');
       setHudOddsMode(false);
     }
   };
