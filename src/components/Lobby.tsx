@@ -189,8 +189,13 @@ export const Lobby: React.FC<LobbyProps> = ({
 
   return (
     <div className="h-[100dvh] max-h-[100dvh] overflow-hidden w-full bg-black text-white flex justify-center select-none">
-      <div className="w-full max-w-[420px] h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col justify-between px-5 pt-2 relative">
-        <div className="flex-1 overflow-y-auto no-scrollbar pb-2">
+      <div
+        style={{
+          paddingTop: 'max(env(safe-area-inset-top, 0px) + 10px, 14px)',
+        }}
+        className="w-full sm:max-w-[480px] h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col justify-between px-4 relative"
+      >
+        <div className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar pb-2">
           {activeTab === 'home' ? (
             <div className="flex flex-col">
               {/* TOP BAR: Subtle Title + Player Name on Left + Orange Circular Level Progress Ring on Right */}
@@ -249,7 +254,7 @@ export const Lobby: React.FC<LobbyProps> = ({
               </div>
 
               {/* HORIZONTAL PASTEL GRADIENT CARDS CAROUSEL (Strictly separated Real vs Bots) */}
-              <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-5 px-5 pb-1.5 snap-x snap-mandatory shrink-0">
+              <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1.5 snap-x snap-mandatory shrink-0">
                 {/* Card 1: Mesas en Vivo (Solo Reales · Sin Bots) */}
                 <button
                   type="button"

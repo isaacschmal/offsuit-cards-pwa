@@ -252,25 +252,6 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     onBroadcastState?.(next);
   };
 
-  // In a Real Friends room (sin bots), allow advancing a friend's seat manually if playing pass-and-play on 1 device
-  const handleFriendSeatAction = (action: PlayerActionInput) => {
-    if (
-      tableState.street === 'showdown' ||
-      !currentActor ||
-      currentActor.id === hero.id ||
-      isVacantSeat(currentActor)
-    ) {
-      return;
-    }
-    const next = applyPlayerAction(tableState, currentActor.id, action);
-    if (next.street === 'showdown') {
-      recordHandCompletedStats(next, hero.id);
-    }
-    setTableState(next);
-    savePersistedRoomState(next.roomId, next);
-    onBroadcastState?.(next);
-  };
-
   const handlePresetSelect = (preset: '1bb' | 'half-pot' | 'pot') => {
     const totalPot = getTotalPot(tableState);
     let target = minRaiseBet;
@@ -345,30 +326,33 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     }
   };
 
-  const friendToCall = currentActor
-    ? Math.max(0, tableState.currentHighestBet - currentActor.currentBet)
-    : 0;
-
   return (
     <div className="h-[100dvh] max-h-[100dvh] overflow-hidden w-full bg-black text-white flex justify-center select-none">
-      <div className="w-full max-w-[420px] h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col justify-between px-4 pt-2 pb-3 relative">
+      <div
+        style={{
+          paddingTop: 'max(env(safe-area-inset-top, 0px) + 14px, 20px)',
+          paddingBottom: 'max(env(safe-area-inset-bottom, 0px) + 12px, 14px)',
+        }}
+        className="w-full sm:max-w-[480px] h-[100dvh] max-h-[100dvh] overflow-hidden flex flex-col justify-between px-4 relative"
+      >
         {/* TOP SECTION: Back Arrow + Mode/Invite Badge + 5 Opponents Row */}
         <div className="shrink-0">
-          <div className="h-10 flex items-center justify-between mb-1">
+          <div className="h-12 flex items-center justify-between mb-1">
             <button
               type="button"
               onClick={handleBackButtonClick}
-              aria-label="Back"
-              className="z-30 w-11 h-11 -ml-1 flex items-center justify-center rounded-full text-white active:bg-white/10 touch-manipulation cursor-pointer"
+              onPointerDown={(e) => e.stopPropagation()}
+              aria-label="Salir al menú"
+              className="z-40 w-12 h-12 -ml-2 flex items-center justify-center rounded-full text-white hover:bg-white/10 active:bg-white/20 active:scale-95 touch-manipulation cursor-pointer"
             >
-              <ArrowLeft className="w-6 h-6 stroke-[2]" />
+              <ArrowLeft className="w-6 h-6 stroke-[2.2]" />
             </button>
 
             {isRealFriendsRoom ? (
               <button
                 type="button"
                 onClick={handleShareRoomLink}
-                className="z-20 text-[11px] px-3 py-1 rounded-full font-medium border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+                className="z-30 text-[11px] px-3 py-1.5 rounded-full font-medium border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
               >
                 {copiedRoomInvite ? (
                   <>
@@ -446,33 +430,16 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               </div>
             )}
 
-            {/* In Real Friends Mode with 2+ players, when waiting on a friend's seat */}
+            {/* In Real Friends Mode with 2+ players, show read-only status when waiting on another player's turn */}
             {isRealFriendsRoom &&
               seatedCount >= 2 &&
               tableState.street !== 'showdown' &&
               currentActor &&
               currentActor.id !== hero.id &&
               !isVacantSeat(currentActor) && (
-                <div className="flex items-center gap-2 text-[11px] text-[#9ca3af]">
-                  <span>Turno de {currentActor.name}...</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleFriendSeatAction({
-                        type: friendToCall === 0 ? 'check' : 'call',
-                      })
-                    }
-                    className="px-2 py-0.5 rounded-full bg-[#1f2128] border border-[#2e313b] text-white font-medium cursor-pointer active:scale-95"
-                  >
-                    {friendToCall === 0 ? 'Check' : `Call ${friendToCall}`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleFriendSeatAction({ type: 'fold' })}
-                    className="px-2 py-0.5 rounded-full bg-[#1f2128] border border-[#2e313b] text-[#ef4444] font-medium cursor-pointer active:scale-95"
-                  >
-                    Fold
-                  </button>
+                <div className="flex items-center gap-1.5 text-[11.5px] text-[#8e9099]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span>Esperando turno de {currentActor.name}...</span>
                 </div>
               )}
           </div>
