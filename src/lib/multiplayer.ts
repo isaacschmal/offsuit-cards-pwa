@@ -19,20 +19,34 @@ export interface OpenRoomInfo {
   updatedAt: number;
 }
 
-const ROOMS_STORAGE_KEY = 'offsuit_open_rooms_directory_v1';
-const ROOM_STATE_PREFIX = 'offsuit_room_state_v1_';
+const ROOMS_STORAGE_KEY = 'cartas_open_rooms_directory_v2';
+const ROOM_STATE_PREFIX = 'cartas_room_state_v2_';
+
+const partykitHost = import.meta.env.VITE_PARTYKIT_HOST as string | undefined;
+export const isPartyKitConfigured = Boolean(partykitHost && partykitHost.trim().length > 0);
+
+export function getPartyKitWebSocketUrl(roomId: string): string | null {
+  if (!partykitHost) return null;
+  const cleanHost = partykitHost.trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '');
+  const isLocal =
+    cleanHost.startsWith('localhost') ||
+    cleanHost.startsWith('127.0.0.1') ||
+    cleanHost.startsWith('0.0.0.0');
+  const protocol = isLocal ? 'ws' : 'wss';
+  return `${protocol}://${cleanHost}/party/${encodeURIComponent(roomId)}`;
+}
 
 export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [
   {
     code: 'PRIMOS',
     name: 'Mesa de los Primos',
-    pacingMode: 'async',
-    playerCount: 4,
+    pacingMode: 'live',
+    playerCount: 5,
     maxPlayers: 6,
     blindsLabel: '1/2',
-    turnTimerSeconds: null,
+    turnTimerSeconds: 20,
     currentTurnPlayerName: 'Tú',
-    updatedAt: Date.now() - 120_000,
+    updatedAt: Date.now() - 45_000,
   },
   {
     code: 'TORNEO',
@@ -40,21 +54,21 @@ export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [
     pacingMode: 'live',
     playerCount: 5,
     maxPlayers: 6,
-    blindsLabel: '1/2',
+    blindsLabel: '2/4',
     turnTimerSeconds: 20,
     currentTurnPlayerName: 'En vivo',
-    updatedAt: Date.now() - 45_000,
+    updatedAt: Date.now() - 95_000,
   },
   {
-    code: 'NOCHE',
-    name: 'Nocturna Relax',
+    code: 'TURNOS',
+    name: 'Ajedrez de Cartas (Por Turnos)',
     pacingMode: 'async',
-    playerCount: 3,
+    playerCount: 4,
     maxPlayers: 6,
-    blindsLabel: '2/4',
+    blindsLabel: '1/2',
     turnTimerSeconds: null,
-    currentTurnPlayerName: 'Por turnos',
-    updatedAt: Date.now() - 600_000,
+    currentTurnPlayerName: 'primo_leo',
+    updatedAt: Date.now() - 320_000,
   },
 ];
 
@@ -187,15 +201,30 @@ export function getOrInitRoomState(roomCode: string): PokerTableState {
 function broadcastDirectoryUpdate(rooms: OpenRoomInfo[]): void {
   if (typeof BroadcastChannel !== 'undefined') {
     try {
-      const bc = new BroadcastChannel('offsuit-rooms-directory');
+      const bc = new BroadcastChannel('cartas-rooms-directory');
       bc.postMessage({ type: 'directory_sync', rooms });
       bc.close();
     } catch {
       // ignore
     }
   }
+
+  // PartyKit Cloudflare zero-cost WebSocket directory broadcast
+  const wsUrl = getPartyKitWebSocketUrl('lobby');
+  if (wsUrl && typeof WebSocket !== 'undefined') {
+    try {
+      const ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'directory_sync', rooms }));
+        setTimeout(() => ws.close(), 250);
+      };
+    } catch {
+      // ignore offline
+    }
+  }
+
   if (supabase) {
-    const channel = supabase.channel('offsuit-lobby-directory');
+    const channel = supabase.channel('cartas-lobby-directory');
     channel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         channel.send({
@@ -213,7 +242,7 @@ export function subscribeToOpenRoomsDirectory(
 ): () => void {
   const bc =
     typeof BroadcastChannel !== 'undefined'
-      ? new BroadcastChannel('offsuit-rooms-directory')
+      ? new BroadcastChannel('cartas-rooms-directory')
       : null;
 
   if (bc) {
@@ -223,6 +252,34 @@ export function subscribeToOpenRoomsDirectory(
         onRoomsUpdated(ev.data.rooms);
       }
     };
+  }
+
+  let lobbyWs: WebSocket | null = null;
+  const wsUrl = getPartyKitWebSocketUrl('lobby');
+  if (wsUrl && typeof WebSocket !== 'undefined') {
+    try {
+      lobbyWs = new WebSocket(wsUrl);
+      lobbyWs.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(String(ev.data)) as {
+            type?: string;
+            rooms?: OpenRoomInfo[];
+          };
+          if (
+            data.type === 'directory_sync' &&
+            Array.isArray(data.rooms) &&
+            data.rooms.length > 0
+          ) {
+            saveOpenRooms(data.rooms);
+            onRoomsUpdated(data.rooms);
+          }
+        } catch {
+          // ignore
+        }
+      };
+    } catch {
+      // ignore
+    }
   }
 
   const handleStorage = (ev: StorageEvent) => {
@@ -237,6 +294,7 @@ export function subscribeToOpenRoomsDirectory(
 
   return () => {
     bc?.close();
+    lobbyWs?.close();
     if (typeof window !== 'undefined') {
       window.removeEventListener('storage', handleStorage);
     }
@@ -278,9 +336,9 @@ export async function notifyPlayerTurn(
   if (Notification.permission !== 'granted') return;
 
   const pot = getTotalPot(state);
-  const title = '¡Es tu turno en la mesa!';
+  const title = '¡Es tu turno en Juegos de Cartas!';
   const body = `${roomName} (#${roomCode}) · Pozo: ${pot} · Te toca actuar.`;
-  const tag = `offsuit-turn-${roomCode}`;
+  const tag = `cartas-turn-${roomCode}`;
 
   try {
     if ('serviceWorker' in navigator) {

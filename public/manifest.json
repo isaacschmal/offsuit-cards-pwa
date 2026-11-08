@@ -1,7 +1,7 @@
 {
-  "name": "Offsuit Cards",
-  "short_name": "Offsuit",
-  "description": "Minimalist multi-game card engine & Texas Hold'em PWA",
+  "name": "Juegos de Cartas",
+  "short_name": "Cartas",
+  "description": "Juegos de Cartas multijugador en vivo y por turnos",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",

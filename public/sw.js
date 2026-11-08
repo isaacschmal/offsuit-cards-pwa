@@ -1,4 +1,4 @@
-const CACHE_NAME = 'offsuit-pwa-v2';
+const CACHE_NAME = 'juegos-de-cartas-pwa-v3';
 const PRECACHE_URLS = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -44,15 +44,15 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('message', (event) => {
   const data = event.data;
   if (data && data.type === 'SHOW_TURN_NOTIFICATION') {
-    const title = data.title || '¡Es tu turno en la mesa!';
+    const title = data.title || '¡Es tu turno en Juegos de Cartas!';
     const options = {
-      body: data.body || 'Te toca actuar en tu partida de Texas Hold’em.',
+      body: data.body || 'Te toca actuar en tu partida.',
       icon: '/favicon.svg',
       badge: '/favicon.svg',
-      tag: data.tag || 'offsuit-turn',
+      tag: data.tag || 'cartas-turn',
       renotify: true,
       data: {
-        roomCode: data.roomCode || 'OFFSUIT',
+        roomCode: data.roomCode || 'PRIMOS',
       },
     };
     event.waitUntil(self.registration.showNotification(title, options));
@@ -61,9 +61,9 @@ self.addEventListener('message', (event) => {
 
 self.addEventListener('push', (event) => {
   let payload = {
-    title: '¡Es tu turno en la mesa!',
+    title: '¡Es tu turno en Juegos de Cartas!',
     body: 'Tus amigos ya jugaron. Entra para ver tus cartas y actuar.',
-    roomCode: 'OFFSUIT',
+    roomCode: 'PRIMOS',
   };
 
   if (event.data) {
@@ -79,7 +79,7 @@ self.addEventListener('push', (event) => {
       body: payload.body,
       icon: '/favicon.svg',
       badge: '/favicon.svg',
-      tag: `offsuit-turn-${payload.roomCode}`,
+      tag: `cartas-turn-${payload.roomCode}`,
       renotify: true,
       data: { roomCode: payload.roomCode },
     })

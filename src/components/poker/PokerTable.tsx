@@ -15,6 +15,11 @@ import {
   type RoomPacingMode,
   savePersistedRoomState,
 } from '../../lib/multiplayer';
+import {
+  loadUserProfile,
+  recordHandCompletedStats,
+  recordPlayerActionStats,
+} from '../../lib/profile';
 import { Avatar3D } from './Avatar3D';
 import { CommunityCardSlot, HoleCardsBlock } from './PlayingCard';
 import { TopOpponentsRow } from './TopOpponentsRow';
@@ -33,13 +38,14 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   onBack,
   onBroadcastState,
   externalState,
-  roomName = 'Mesa Offsuit',
+  roomName = 'Mesa de Cartas',
   pacingMode = 'live',
 }) => {
   const [tableState, setTableState] = useState<PokerTableState>(initialState);
   const [isSliderOpen, setIsSliderOpen] = useState(false);
   const [sliderAmount, setSliderAmount] = useState<number>(initialState.minRaiseTo);
   const [hudOddsMode, setHudOddsMode] = useState<boolean>(false);
+  const [heroAvatarId] = useState<string>(() => loadUserProfile().avatarId);
   const prevTurnIndexRef = useRef<number>(initialState.currentTurnIndex);
 
   useEffect(() => {
@@ -98,13 +104,16 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     const timer = window.setTimeout(() => {
       const decision = getBotDecision(tableState, currentActor.id);
       const next = applyPlayerAction(tableState, currentActor.id, decision);
+      if (next.street === 'showdown') {
+        recordHandCompletedStats(next, hero.id);
+      }
       setTableState(next);
       savePersistedRoomState(next.roomId, next);
       onBroadcastState?.(next);
     }, 550);
 
     return () => window.clearTimeout(timer);
-  }, [tableState, onBroadcastState]);
+  }, [tableState, hero.id, onBroadcastState]);
 
   // Evaluate Hero's current hand & Monte Carlo equity
   const heroHandEval = useMemo(() => {
@@ -146,7 +155,11 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
   const handleHeroAction = (action: PlayerActionInput) => {
     if (!isHeroTurn) return;
+    recordPlayerActionStats(action);
     const next = applyPlayerAction(tableState, hero.id, action);
+    if (next.street === 'showdown') {
+      recordHandCompletedStats(next, hero.id);
+    }
     setIsSliderOpen(false);
     setTableState(next);
     savePersistedRoomState(next.roomId, next);
@@ -385,7 +398,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                     </span>
 
                     <div className="my-auto flex items-center justify-center">
-                      <Avatar3D avatarId="hero" size={48} />
+                      <Avatar3D avatarId={heroAvatarId} size={48} />
                     </div>
 
                     <span className="text-[20px] font-normal text-white leading-none">

@@ -12,26 +12,28 @@ import {
   savePersistedRoomState,
   upsertOpenRoom,
 } from './lib/multiplayer';
+import { loadUserProfile } from './lib/profile';
 import { connectToPokerRoom, type RoomSyncHandle } from './lib/supabase';
 
 export function App() {
-  const [view, setView] = useState<'table' | 'lobby'>('table');
-  const [roomCode, setRoomCode] = useState<string>('OFFSUIT');
-  const [roomName, setRoomName] = useState<string>('Mesa Offsuit');
+  const [view, setView] = useState<'lobby' | 'table'>('lobby');
+  const [roomCode, setRoomCode] = useState<string>('PRIMOS');
+  const [roomName, setRoomName] = useState<string>('Mesa de los Primos');
   const [pacingMode, setPacingMode] = useState<RoomPacingMode>('live');
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [tableState, setTableState] = useState<PokerTableState>(() =>
-    createInitialTableState('OFFSUIT')
+    createInitialTableState('PRIMOS')
   );
   const [externalState, setExternalState] = useState<PokerTableState | null>(null);
   const syncRef = useRef<RoomSyncHandle | null>(null);
 
   useEffect(() => {
     syncRef.current?.disconnect();
+    const profile = loadUserProfile();
     const handle = connectToPokerRoom(
       roomCode,
       'hero',
-      'You',
+      profile.name,
       (incomingState) => {
         setExternalState(incomingState);
         setTableState(incomingState);

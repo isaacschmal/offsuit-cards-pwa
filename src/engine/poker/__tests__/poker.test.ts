@@ -146,3 +146,52 @@ describe('Poker Table State Machine', () => {
   });
 });
 
+describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () => {
+  it('computes LAG, TAG, ROCK, and FISH archetypes accurately for the diamond radar chart', async () => {
+    const {
+      CARD_BACK_THEMES,
+      DEFAULT_USER_PROFILE,
+      computePlaystyleMetrics,
+      cycleCardBackColor,
+    } = await import('../../../lib/profile');
+
+    // Default profile is calibrated to LAG (Loose-Aggressive) matching image_2.png
+    const defaultMetrics = computePlaystyleMetrics(DEFAULT_USER_PROFILE.stats);
+    expect(defaultMetrics.archetype).toBe('LAG');
+    expect(defaultMetrics.aggressive).toBeGreaterThan(defaultMetrics.passive);
+    expect(defaultMetrics.loose).toBeGreaterThan(defaultMetrics.tight);
+
+    // Tight-Passive (ROCK)
+    const rockMetrics = computePlaystyleMetrics({
+      handsPlayed: 30,
+      vpipCount: 4,
+      aggressiveCount: 2,
+      passiveCount: 15,
+      foldCount: 25,
+      handsWon: 3,
+    });
+    expect(rockMetrics.archetype).toBe('ROCK');
+
+    // Loose-Passive (FISH)
+    const fishMetrics = computePlaystyleMetrics({
+      handsPlayed: 30,
+      vpipCount: 26,
+      aggressiveCount: 3,
+      passiveCount: 28,
+      foldCount: 2,
+      handsWon: 6,
+    });
+    expect(fishMetrics.archetype).toBe('FISH');
+
+    // Supports all 4 customizable card back colors
+    expect(CARD_BACK_THEMES.slate.hex).toBe('#9aa3aa');
+    expect(CARD_BACK_THEMES.indigo.hex).toBe('#6366f1');
+    expect(CARD_BACK_THEMES.emerald.hex).toBe('#10b981');
+    expect(CARD_BACK_THEMES.crimson.hex).toBe('#e11d48');
+
+    const cycled = cycleCardBackColor();
+    expect(cycled.cardBackColor).toBe('indigo');
+  });
+});
+
+

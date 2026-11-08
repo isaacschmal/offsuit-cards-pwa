@@ -2,6 +2,11 @@ import { motion, type PanInfo } from 'framer-motion';
 import React, { useEffect, useState } from 'react';
 import { formatRank, isRedSuit } from '../../engine/deck';
 import type { Card, Suit } from '../../engine/types';
+import {
+  CARD_BACK_THEMES,
+  type CardBackColorId,
+  loadUserProfile,
+} from '../../lib/profile';
 
 interface SuitGraphicProps {
   suit: Suit;
@@ -43,18 +48,45 @@ export const SuitGraphic: React.FC<SuitGraphicProps> = ({ suit, size = 22 }) => 
   );
 };
 
+export interface CardBackProps {
+  className?: string;
+  colorId?: CardBackColorId;
+}
+
 /**
- * Exact Offsuit geometric slate-gray card back (#9aa3aa) with white outer border
- * and slowly spinning 12-spoke central white spinner/rosette (IMG_8408, IMG_8413).
+ * Clean static geometric card back with white outer border and static 12-spoke central rosette.
+ * Supports customizable colors ('slate' #9aa3aa, 'indigo' #6366f1, 'emerald' #10b981, 'crimson' #e11d48).
  */
-export const OffsuitCardBack: React.FC<{ className?: string }> = ({ className = '' }) => {
+export const OffsuitCardBack: React.FC<CardBackProps> = ({
+  className = '',
+  colorId,
+}) => {
+  const [prefColor, setPrefColor] = useState<CardBackColorId>(
+    () => loadUserProfile().cardBackColor
+  );
+
+  useEffect(() => {
+    const handleProfileUpdate = () => {
+      setPrefColor(loadUserProfile().cardBackColor);
+    };
+    window.addEventListener('cartas-profile-updated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('cartas-profile-updated', handleProfileUpdate);
+    };
+  }, []);
+
+  const activeColorId = colorId ?? prefColor;
+  const theme = CARD_BACK_THEMES[activeColorId] ?? CARD_BACK_THEMES.slate;
   const spokes = Array.from({ length: 12 }, (_, i) => i * 30);
 
   return (
     <div
       className={`relative bg-white p-[3px] rounded-[18px] overflow-hidden select-none ${className}`}
     >
-      <div className="w-full h-full rounded-[15px] bg-[#9aa3aa] relative overflow-hidden flex items-center justify-center">
+      <div
+        className="w-full h-full rounded-[15px] relative overflow-hidden flex items-center justify-center transition-colors duration-200"
+        style={{ backgroundColor: theme.hex }}
+      >
         <svg
           viewBox="0 0 100 142"
           className="absolute inset-0 w-full h-full"
@@ -79,32 +111,30 @@ export const OffsuitCardBack: React.FC<{ className?: string }> = ({ className = 
             <path d="M5 132 Q50 87 95 132" />
           </g>
 
-          {/* Central solid slate medallion with white border */}
+          {/* Central solid medallion with white border */}
           <circle
             cx="50"
             cy="71"
             r="25"
-            fill="#9aa3aa"
+            fill={theme.hex}
             stroke="rgba(255,255,255,0.55)"
             strokeWidth="1.2"
           />
 
-          {/* Slowly spinning 12-spoke white spinner/rosette */}
+          {/* Static 12-spoke printed white geometric rosette (no spinning animation) */}
           <g transform="translate(50, 71)">
-            <g className="offsuit-rosette-spin">
-              {spokes.map((angle) => (
-                <rect
-                  key={angle}
-                  x="-1.6"
-                  y="-15.5"
-                  width="3.2"
-                  height="7.5"
-                  rx="1.6"
-                  fill="#ffffff"
-                  transform={`rotate(${angle})`}
-                />
-              ))}
-            </g>
+            {spokes.map((angle) => (
+              <rect
+                key={angle}
+                x="-1.6"
+                y="-15.5"
+                width="3.2"
+                height="7.5"
+                rx="1.6"
+                fill="#ffffff"
+                transform={`rotate(${angle})`}
+              />
+            ))}
           </g>
         </svg>
       </div>
@@ -112,9 +142,12 @@ export const OffsuitCardBack: React.FC<{ className?: string }> = ({ className = 
   );
 };
 
+export const CardBack = OffsuitCardBack;
+
 interface CommunityCardSlotProps {
   card?: Card;
   index: number;
+  cardBackColor?: CardBackColorId;
 }
 
 /**
@@ -123,7 +156,11 @@ interface CommunityCardSlotProps {
  * mounted with `backfaceVisibility: 'hidden'` and animates `rotateY` from 0deg to 180deg
  * with a staggered flop delay (`index * 0.14s`).
  */
-export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({ card, index }) => {
+export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({
+  card,
+  index,
+  cardBackColor,
+}) => {
   const overlapClass = index > 0 ? '-ml-[3px]' : '';
   const [lastRevealedCard, setLastRevealedCard] = useState<Card | undefined>(card);
 
@@ -166,7 +203,10 @@ export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({ card, inde
             transform: 'rotateY(0deg)',
           }}
         >
-          <OffsuitCardBack className="w-full h-full shadow-[-4px_0_12px_rgba(0,0,0,0.22)]" />
+          <OffsuitCardBack
+            colorId={cardBackColor}
+            className="w-full h-full shadow-[-4px_0_12px_rgba(0,0,0,0.22)]"
+          />
         </div>
 
         {/* Front Face (180deg) */}

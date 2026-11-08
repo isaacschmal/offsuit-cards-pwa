@@ -20,7 +20,7 @@ body,
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom Range Slider matching Offsuit iOS slider */
+/* Custom Range Slider */
 input[type="range"].offsuit-slider {
   -webkit-appearance: none;
   appearance: none;
@@ -53,16 +53,12 @@ input[type="range"].offsuit-slider::-moz-range-thumb {
   border: none;
 }
 
-@keyframes offsuitRosetteSpin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
-.offsuit-rosette-spin {
-  animation: offsuitRosetteSpin 18s linear infinite;
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
