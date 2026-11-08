@@ -430,34 +430,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       </div>
 
-      {/* Quick Language Switcher Row */}
-      <div className="mt-2 flex items-center justify-between bg-[#111216] border border-[#1f2127] rounded-[14px] px-3 py-1.5">
-        <span className="text-[11px] text-[#7c7d85] flex items-center gap-1.5">
-          <span>🌐</span>
-          <span>{t(currentLang, 'languageLabel')}</span>
-        </span>
-        <div className="flex items-center gap-1 bg-[#181a20] p-0.5 rounded-full border border-[#23252a]">
-          {SUPPORTED_LANGUAGES.map((lang) => {
-            const isSelected = currentLang === lang.code;
-            return (
-              <button
-                key={lang.code}
-                type="button"
-                onClick={() => handleSelectLanguage(lang.code)}
-                aria-label={`Cambiar idioma a ${lang.label}`}
-                className={`h-6 px-2.5 rounded-full text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer ${
-                  isSelected
-                    ? 'bg-white text-black font-semibold shadow-sm'
-                    : 'text-[#9ca3af] hover:text-white'
-                }`}
-              >
-                <span className="text-[12px]">{lang.flag}</span>
-                <span>{lang.shortLabel}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
 
       {/* Full-width bottom pill: 🦐 Shrimp · Rank progress (Interactive Button) */}
       <button
