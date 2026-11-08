@@ -53,107 +53,14 @@ interface LobbyProps {
   ) => void;
 }
 
-export interface CardGameItem {
-  id: string;
-  name: string;
-  category: string;
-  tag: string;
-  tagColor: string;
-  players: string;
-  description: string;
-  iconEmoji: string;
-  accentGradient: string;
-  status: 'active' | 'upcoming';
-  rules: string[];
-}
+import {
+  type CardGameCatalogItem,
+  getLocalizedCardGames,
+  type SupportedLanguage,
+  t,
+} from '../lib/i18n';
 
-export const CARD_GAMES: CardGameItem[] = [
-  {
-    id: 'poker',
-    name: "Texas Hold'em Poker",
-    category: 'Cartas & Apuestas',
-    tag: 'Disponible',
-    tagColor: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-    players: '2-6 Jugadores',
-    description: 'Póker sin límite. Botes compartidos, ciegas y partidas en vivo o por turnos.',
-    iconEmoji: '♠️',
-    accentGradient: 'from-blue-600/20 to-emerald-600/20',
-    status: 'active',
-    rules: [
-      'Cada jugador recibe 2 cartas privadas.',
-      'Se revelan 5 cartas comunitarias (Flop, Turn, River).',
-      'Forma la mejor combinación de 5 cartas para llevarte el bote.',
-    ],
-  },
-  {
-    id: 'uno',
-    name: 'UNO Classic',
-    category: 'Cartas & Fiesta',
-    tag: 'Próximamente',
-    tagColor: 'bg-[#fb923c]/15 text-[#fb923c] border-[#fb923c]/30',
-    players: '2-8 Jugadores',
-    description: 'Empareja colores y números. Cartas de acción +2, +4, reversa y cambio de color.',
-    iconEmoji: '🃏',
-    accentGradient: 'from-red-600/20 via-amber-600/20 to-blue-600/20',
-    status: 'upcoming',
-    rules: [
-      'Empareja la carta en juego por color o por número.',
-      'Usa cartas de acción: Roba 2, Salto, Reversa y Comodín +4.',
-      '¡No olvides cantar UNO cuando te quede una sola carta!',
-    ],
-  },
-  {
-    id: 'blackjack',
-    name: 'Blackjack (Veintiuno)',
-    category: 'Casino & Estrategia',
-    tag: 'Próximamente',
-    tagColor: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-    players: '1-7 Jugadores',
-    description: 'Pide cartas o plántate. Supera la mano de la casa sin pasarte de 21.',
-    iconEmoji: '🎲',
-    accentGradient: 'from-indigo-600/20 to-purple-600/20',
-    status: 'upcoming',
-    rules: [
-      'El objetivo es sumar 21 o más que el crupier sin pasarte.',
-      'Las figuras valen 10 y el As vale 1 u 11.',
-      'Blackjack natural (As + 10/Figura) paga 3 a 2.',
-    ],
-  },
-  {
-    id: 'viuda',
-    name: 'La Viuda (Póker Tapado)',
-    category: 'Tradicional Mexicano',
-    tag: 'Próximamente',
-    tagColor: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-    players: '3-6 Jugadores',
-    description: 'Clásico de 5 cartas con baraja oculta central. Cambia tus cartas y compite por vidas.',
-    iconEmoji: '👑',
-    accentGradient: 'from-rose-600/20 to-amber-600/20',
-    status: 'upcoming',
-    rules: [
-      'Cada jugador recibe 5 cartas y hay una "viuda" de 5 cartas en el centro.',
-      'Elige jugar con tu mano o cambiarla por la viuda antes de que empiece la ronda.',
-      'Intercambia cartas una a una para armar tu mejor jugada.',
-    ],
-  },
-  {
-    id: 'conquian',
-    name: 'Conquián / Rummy',
-    category: 'Mazo Español',
-    tag: 'Próximamente',
-    tagColor: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
-    players: '2-4 Jugadores',
-    description: 'El juego tradicional de combinaciones. Forma tercias y corridas para vaciar tu mano.',
-    iconEmoji: '🎴',
-    accentGradient: 'from-cyan-600/20 to-teal-600/20',
-    status: 'upcoming',
-    rules: [
-      'Se juega con baraja de 40 cartas.',
-      'Forma grupos de tres o más cartas (tercias o corridas).',
-      'El primero en bajar 9 cartas gana la partida.',
-    ],
-  },
-];
+export type CardGameItem = CardGameCatalogItem;
 
 export const Lobby: React.FC<LobbyProps> = ({
   activeRoomCode,
@@ -209,6 +116,12 @@ export const Lobby: React.FC<LobbyProps> = ({
       return next;
     });
   };
+
+  const currentLang: SupportedLanguage = profile.language ?? 'es';
+  const cardGames = useMemo(
+    () => getLocalizedCardGames(currentLang),
+    [currentLang]
+  );
 
   // Welcome First-Time Name & Avatar & Linking state
   const [welcomeName, setWelcomeName] = useState(() =>
@@ -397,7 +310,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 <div className="flex items-center gap-2">
                   <img src="/favicon.svg" alt="Logo" className="w-[18px] h-[18px] rounded-[4px] object-contain shrink-0" />
                   <span className="text-[13.5px] font-medium text-[#d1d5db] tracking-tight">
-                    Juegos de Cartas
+                    {currentLang === 'en' ? 'Card Games' : currentLang === 'it' ? 'Giochi di Carte' : 'Juegos de Cartas'}
                   </span>
                   {profile.hasSetCustomName && (
                     <span className="text-[12px] text-[#6b6d76]">
@@ -410,7 +323,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                 <button
                   type="button"
                   onClick={() => setActiveTab('profile')}
-                  aria-label={`Nivel ${profile.level}`}
+                  aria-label={`${t(currentLang, 'level')} ${profile.level}`}
                   className="relative w-9 h-9 flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
                 >
                   <svg className="w-9 h-9 -rotate-90" viewBox="0 0 38 38">
@@ -449,10 +362,10 @@ export const Lobby: React.FC<LobbyProps> = ({
                     </div>
                     <div className="flex flex-col min-w-0">
                       <span className="text-[12px] font-semibold text-white truncate">
-                        ¿Tienes 'Cartas' en tu pantalla de inicio?
+                        {t(currentLang, 'safariBannerTitle')}
                       </span>
                       <span className="text-[10.5px] text-[#9ca3af] leading-tight">
-                        Abre 'Cartas' para jugar con tu cuenta guardada y fichas
+                        {t(currentLang, 'safariBannerDesc')}
                       </span>
                     </div>
                   </div>
@@ -485,14 +398,14 @@ export const Lobby: React.FC<LobbyProps> = ({
               {/* HERO COUNTER: Giant Ultra-Light Bankroll Balance (Saldo Total) */}
               <div className="my-3 px-5 flex flex-col items-start text-left shrink-0">
                 <span className="text-[12px] font-medium text-[#9ca3af] tracking-wide uppercase">
-                  Saldo Total
+                  {t(currentLang, 'totalBalance')}
                 </span>
                 <div className="flex items-baseline gap-2 mt-0.5">
                   <span className="font-extralight text-[64px] tracking-tight leading-none text-white">
                     {profile.bankroll.toLocaleString('en-US')}
                   </span>
                   <span className="text-[17px] font-medium text-[#eab308]">
-                    fichas
+                    {currentLang === 'en' ? 'chips' : currentLang === 'it' ? 'chip' : 'fichas'}
                   </span>
                 </div>
               </div>
@@ -503,14 +416,18 @@ export const Lobby: React.FC<LobbyProps> = ({
                   <div className="flex items-center justify-between px-0.5">
                     <div className="flex items-center gap-1.5">
                       <span className="text-[13px] font-semibold text-white tracking-tight">
-                        Tus Partidas en Curso
+                        {t(currentLang, 'activeTablesTitle')}
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
                         {activeGames.length}
                       </span>
                     </div>
                     <span className="text-[10.5px] text-[#9ca3af]">
-                      Mano activa · Sal o vuelve cuando quieras
+                      {currentLang === 'en'
+                        ? 'Active hand · Leave or rejoin anytime'
+                        : currentLang === 'it'
+                        ? 'Mano attiva · Esci o rientra quando vuoi'
+                        : 'Mano activa · Sal o vuelve cuando quieras'}
                     </span>
                   </div>
 
@@ -536,7 +453,15 @@ export const Lobby: React.FC<LobbyProps> = ({
                               }`}
                             >
                               {game.room.pacingMode === 'async'
-                                ? '⏳ Turnos'
+                                ? currentLang === 'en'
+                                  ? '⏳ Turns'
+                                  : currentLang === 'it'
+                                  ? '⏳ Turni'
+                                  : '⏳ Turnos'
+                                : currentLang === 'en'
+                                ? '⚡ Live'
+                                : currentLang === 'it'
+                                ? '⚡ Dal Vivo'
                                 : '⚡ En Vivo'}
                             </span>
                           </div>
@@ -545,20 +470,18 @@ export const Lobby: React.FC<LobbyProps> = ({
                             {game.isMyTurn ? (
                               <span className="flex items-center gap-1.5 text-[11.5px] font-bold text-[#fb923c]">
                                 <span className="w-2 h-2 rounded-full bg-[#f97316] animate-pulse" />
-                                <span>¡Es tu turno!</span>
+                                <span>{t(currentLang, 'yourTurn')}</span>
                               </span>
                             ) : (
                               <span className="text-[11px] text-[#9ca3af]">
-                                Turno:{' '}
-                                <strong className="text-white font-medium">
-                                  {game.currentTurnName}
-                                </strong>
+                                {t(currentLang, 'waitingOnPlayer', { name: game.currentTurnName })}
                               </span>
                             )}
                             <span className="text-[11px] text-[#7c7d85]">
-                              · Mesa:{' '}
+                              · {currentLang === 'en' ? 'Table' : currentLang === 'it' ? 'Tavolo' : 'Mesa'}:{' '}
                               <strong className="text-[#eab308] font-semibold">
-                                {game.tableStack} fichas
+                                {game.tableStack}{' '}
+                                {currentLang === 'en' ? 'chips' : currentLang === 'it' ? 'chip' : 'fichas'}
                               </strong>
                             </span>
                           </div>
@@ -577,7 +500,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                           }
                           className="h-8 px-3.5 rounded-full bg-white text-black text-[12px] font-bold flex items-center gap-1 shrink-0 active:scale-95 transition-transform cursor-pointer shadow-md"
                         >
-                          <span>Reanudar</span>
+                          <span>{t(currentLang, 'rejoinTable')}</span>
                           <ArrowRight className="w-3.5 h-3.5 stroke-[2.5]" />
                         </button>
                       </div>
@@ -596,7 +519,13 @@ export const Lobby: React.FC<LobbyProps> = ({
                   type="text"
                   value={quickCodeInput}
                   onChange={(e) => setQuickCodeInput(e.target.value.toUpperCase())}
-                  placeholder="Escribe un código de sala (ej. MESA1)..."
+                  placeholder={
+                    currentLang === 'en'
+                      ? 'Enter table code (e.g. TABLE1)...'
+                      : currentLang === 'it'
+                      ? 'Inserisci codice tavolo (es. TAVOLO1)...'
+                      : 'Escribe un código de sala (ej. MESA1)...'
+                  }
                   maxLength={8}
                   className="flex-1 bg-transparent text-white text-[12px] placeholder:text-[#5e6068] focus:outline-none"
                 />
@@ -604,7 +533,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                   type="submit"
                   className="h-7 px-3.5 rounded-full bg-white text-black text-[11px] font-bold active:scale-95 transition-transform cursor-pointer shrink-0"
                 >
-                  Entrar
+                  {t(currentLang, 'goBtn')}
                 </button>
               </form>
 
@@ -677,19 +606,27 @@ export const Lobby: React.FC<LobbyProps> = ({
                       className="inline-block text-[11px] font-semibold rounded-full bg-[#0f172a]/10 text-[#0f172a]"
                     >
                       {liveRealRoomsCount > 0
-                        ? `${liveRealRoomsCount} ${
-                            liveRealRoomsCount === 1 ? 'sala' : 'salas'
-                          } · En Vivo`
+                        ? `${liveRealRoomsCount} · ${
+                            currentLang === 'en' ? 'Live' : currentLang === 'it' ? 'Dal Vivo' : 'En Vivo'
+                          }`
+                        : currentLang === 'en'
+                        ? 'Real Friends · Live'
+                        : currentLang === 'it'
+                        ? 'Amici Reali · Dal Vivo'
                         : 'Solo Reales · En Vivo'}
                     </span>
                   </div>
 
                   <div className="flex flex-col items-start text-left w-full">
                     <h2 className="text-[24px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                      Mesas en Vivo
+                      {currentLang === 'en' ? 'Live Tables' : currentLang === 'it' ? 'Tavoli dal Vivo' : 'Mesas en Vivo'}
                     </h2>
                     <p className="text-[13.5px] text-[#334155] font-normal mt-1 leading-snug">
-                      Juega con amigos reales conectados (sin bots)
+                      {currentLang === 'en'
+                        ? 'Play with real friends connected online (no bots)'
+                        : currentLang === 'it'
+                        ? 'Gioca con amici reali connessi (senza bot)'
+                        : 'Juega con amigos reales conectados (sin bots)'}
                     </p>
                   </div>
                 </button>
@@ -729,16 +666,24 @@ export const Lobby: React.FC<LobbyProps> = ({
                       style={{ padding: '4px 10px' }}
                       className="inline-block text-[11px] font-semibold rounded-full bg-[#0f172a]/10 text-[#0f172a]"
                     >
-                      Solo Reales · 24h
+                      {currentLang === 'en'
+                        ? 'Real Friends · 24h'
+                        : currentLang === 'it'
+                        ? 'Amici Reali · 24h'
+                        : 'Solo Reales · 24h'}
                     </span>
                   </div>
 
                   <div className="flex flex-col items-start text-left w-full">
                     <h2 className="text-[24px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                      Por Turnos
+                      {currentLang === 'en' ? 'Turn-Based' : currentLang === 'it' ? 'A Turni' : 'Por Turnos'}
                     </h2>
                     <p className="text-[13.5px] text-[#334155] font-normal mt-1 leading-snug">
-                      Sin prisa entre amigos, te avisa cuando te toca
+                      {currentLang === 'en'
+                        ? 'Take your time with friends, get notified on your turn'
+                        : currentLang === 'it'
+                        ? 'Con calma tra amici, ricevi una notifica al tuo turno'
+                        : 'Sin prisa entre amigos, te avisa cuando te toca'}
                     </p>
                   </div>
                 </button>
@@ -764,16 +709,20 @@ export const Lobby: React.FC<LobbyProps> = ({
                       style={{ padding: '4px 10px' }}
                       className="inline-block text-[11px] font-semibold rounded-full bg-[#0f172a]/10 text-[#0f172a]"
                     >
-                      5 Bots IA
+                      {currentLang === 'en' ? '5 AI Bots' : currentLang === 'it' ? '5 Bot IA' : '5 Bots IA'}
                     </span>
                   </div>
 
                   <div className="flex flex-col items-start text-left w-full">
                     <h2 className="text-[24px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                      Práctica vs Bots
+                      {currentLang === 'en' ? 'Practice vs Bots' : currentLang === 'it' ? 'Pratica vs Bot' : 'Práctica vs Bots'}
                     </h2>
                     <p className="text-[13.5px] text-[#334155] font-normal mt-1 leading-snug">
-                      Entrena jugadas al instante contra los 5 bots IA
+                      {currentLang === 'en'
+                        ? 'Train your strategies instantly against 5 AI bots'
+                        : currentLang === 'it'
+                        ? 'Allenati subito contro 5 bot con IA'
+                        : 'Entrena jugadas al instante contra los 5 bots IA'}
                     </p>
                   </div>
                 </button>
@@ -795,12 +744,16 @@ export const Lobby: React.FC<LobbyProps> = ({
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-medium shrink-0">
                           {primaryOpenRoom.roomMode === 'bots'
                             ? '🤖 Bots'
+                            : currentLang === 'en'
+                            ? '👥 Real Friends'
+                            : currentLang === 'it'
+                            ? '👥 Amici Reali'
                             : '👥 Solo Reales'}
                         </span>
                       </div>
                       <span className="text-[11px] text-[#7c7d85] mt-0.5">
-                        #{primaryOpenRoom.code} · Entrada: {primaryOpenRoom.buyIn ?? (primaryOpenRoom.roomMode === 'bots' ? 100 : 200)} · {primaryOpenRoom.playerCount}/
-                        {primaryOpenRoom.maxPlayers} · Ver salas ({openRooms.length})
+                        #{primaryOpenRoom.code} · {currentLang === 'en' ? 'Buy-in' : currentLang === 'it' ? 'Buy-in' : 'Entrada'}: {primaryOpenRoom.buyIn ?? (primaryOpenRoom.roomMode === 'bots' ? 100 : 200)} · {primaryOpenRoom.playerCount}/
+                        {primaryOpenRoom.maxPlayers} · {t(currentLang, 'roomsBtn')} ({openRooms.length})
                       </span>
                     </button>
 
@@ -819,7 +772,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                         onClick={() => setIsRoomsModalOpen(true)}
                         className="h-7 px-2.5 rounded-full bg-[#23252a] text-white text-[11.5px] font-medium active:scale-95 transition-transform cursor-pointer"
                       >
-                        Salas
+                        {t(currentLang, 'roomsBtn')}
                       </button>
                       <button
                         type="button"
@@ -834,7 +787,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                         }
                         className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-semibold active:scale-95 transition-transform cursor-pointer"
                       >
-                        Unirse
+                        {t(currentLang, 'joinBtn')}
                       </button>
                     </div>
                   </div>
@@ -842,10 +795,10 @@ export const Lobby: React.FC<LobbyProps> = ({
                   <div className="mt-2.5 bg-[#121316] border border-[#23252a] rounded-[18px] px-3.5 py-2.5 flex items-center justify-between gap-3 shrink-0">
                     <div className="flex flex-col text-left">
                       <span className="text-[12px] font-medium text-white leading-snug">
-                        No hay salas abiertas en este momento
+                        {t(currentLang, 'noOpenRoomsTitle')}
                       </span>
                       <span className="text-[10.5px] text-[#7c7d85] mt-0.5">
-                        Crea una sala y comparte el código con tus amigos
+                        {t(currentLang, 'noOpenRoomsDesc')}
                       </span>
                     </div>
 
@@ -854,7 +807,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                       onClick={() => setIsRoomsModalOpen(true)}
                       className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-semibold shrink-0 active:scale-95 transition-transform cursor-pointer"
                     >
-                      Crear Sala
+                      {t(currentLang, 'createTableBtn')}
                     </button>
                   </div>
                 )}
@@ -864,20 +817,20 @@ export const Lobby: React.FC<LobbyProps> = ({
                   <div className="flex items-center justify-between px-1 mb-2.5">
                     <div>
                       <h3 className="text-[16px] font-semibold text-white tracking-tight flex items-center gap-1.5">
-                        <span>Catálogo de Juegos</span>
+                        <span>{t(currentLang, 'gameCatalogTitle')}</span>
                         <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                       </h3>
                       <p className="text-[11px] text-[#7c7d85] -mt-0.5">
-                        Texas Hold'em, UNO y próximas modalidades
+                        {t(currentLang, 'gameCatalogSub')}
                       </p>
                     </div>
                     <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#1b1d24] text-[#9ca3af] border border-[#23252a]">
-                      {CARD_GAMES.length} juegos
+                      {t(currentLang, 'gamesCountBadge', { count: cardGames.length })}
                     </span>
                   </div>
 
                   <div className="flex flex-col gap-2.5">
-                    {CARD_GAMES.map((game) => {
+                    {cardGames.map((game) => {
                       const isVoted = votedGameIds.includes(game.id);
                       return (
                         <div
@@ -933,7 +886,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                               className="text-[11px] font-medium text-[#9ca3af] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
                             >
                               <Info className="w-3.5 h-3.5 text-[#7c7d85]" />
-                              <span>Reglas & detalles</span>
+                              <span>{t(currentLang, 'rulesAndDetails')}</span>
                               <ChevronRight className="w-3 h-3 text-[#7c7d85]" />
                             </button>
 
@@ -943,7 +896,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                                 onClick={() => setIsRoomsModalOpen(true)}
                                 className="h-7 px-3.5 rounded-full bg-white text-black text-[11px] font-semibold flex items-center gap-1 active:scale-95 transition-transform cursor-pointer"
                               >
-                                <span>Jugar Póker</span>
+                                <span>{t(currentLang, 'playPoker')}</span>
                                 <ArrowRight className="w-3 h-3" />
                               </button>
                             ) : (
@@ -959,12 +912,12 @@ export const Lobby: React.FC<LobbyProps> = ({
                                 {isVoted ? (
                                   <>
                                     <Check className="w-3 h-3 text-[#4ade80]" />
-                                    <span>¡Votado!</span>
+                                    <span>{t(currentLang, 'votedMode')}</span>
                                   </>
                                 ) : (
                                   <>
                                     <span>👍</span>
-                                    <span>Votar modo</span>
+                                    <span>{t(currentLang, 'voteMode')}</span>
                                   </>
                                 )}
                               </button>
@@ -997,7 +950,7 @@ export const Lobby: React.FC<LobbyProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('home')}
-            aria-label="Inicio"
+            aria-label={t(currentLang, 'home')}
             className={`flex flex-col items-center justify-center gap-1 py-1.5 px-6 cursor-pointer transition-colors ${
               activeTab === 'home'
                 ? 'text-white'
@@ -1010,7 +963,7 @@ export const Lobby: React.FC<LobbyProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('profile')}
-            aria-label="Perfil y Estadísticas"
+            aria-label={t(currentLang, 'profile')}
             className={`flex flex-col items-center justify-center gap-1 py-1.5 px-6 cursor-pointer transition-colors ${
               activeTab === 'profile'
                 ? 'text-white'
@@ -1303,7 +1256,7 @@ export const Lobby: React.FC<LobbyProps> = ({
               <div className="border-t border-[#23252a] pt-3 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[13px] font-medium text-white">
-                    Crear Nueva Sala
+                    {t(currentLang, 'modalTitle')}
                   </span>
                   {notifPerm !== 'granted' && notifPerm !== 'unsupported' && (
                     <button
@@ -1316,7 +1269,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                       className="flex items-center gap-1 text-[11px] text-[#eab308] cursor-pointer"
                     >
                       <Bell className="w-3 h-3" />
-                      <span>Avisar turno</span>
+                      <span>{t(currentLang, 'turnNotifications')}</span>
                     </button>
                   )}
                 </div>
@@ -1332,7 +1285,13 @@ export const Lobby: React.FC<LobbyProps> = ({
                         : 'text-[#7c7d85]'
                     }`}
                   >
-                    <span>👥 Solo Amigos Reales</span>
+                    <span>
+                      {currentLang === 'en'
+                        ? '👥 Real Friends Only'
+                        : currentLang === 'it'
+                        ? '👥 Solo Amici Reali'
+                        : '👥 Solo Amigos Reales'}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -1346,7 +1305,13 @@ export const Lobby: React.FC<LobbyProps> = ({
                         : 'text-[#7c7d85]'
                     }`}
                   >
-                    <span>🤖 Con Bots</span>
+                    <span>
+                      {currentLang === 'en'
+                        ? '🤖 With Bots'
+                        : currentLang === 'it'
+                        ? '🤖 Con i Bot'
+                        : '🤖 Con Bots'}
+                    </span>
                   </button>
                 </div>
 
@@ -1362,7 +1327,9 @@ export const Lobby: React.FC<LobbyProps> = ({
                     }`}
                   >
                     <Zap className="w-3.5 h-3.5" />
-                    <span>En Vivo</span>
+                    <span>
+                      {currentLang === 'en' ? 'Live' : currentLang === 'it' ? 'Dal Vivo' : 'En Vivo'}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -1374,7 +1341,9 @@ export const Lobby: React.FC<LobbyProps> = ({
                     }`}
                   >
                     <Clock className="w-3.5 h-3.5" />
-                    <span>Por Turnos</span>
+                    <span>
+                      {currentLang === 'en' ? 'Turn-Based' : currentLang === 'it' ? 'A Turni' : 'Por Turnos'}
+                    </span>
                   </button>
                 </div>
 
@@ -1382,10 +1351,11 @@ export const Lobby: React.FC<LobbyProps> = ({
                 <div className="flex flex-col gap-1.5 bg-black/60 p-2.5 rounded-[18px] border border-[#23252a]">
                   <div className="flex items-center justify-between px-1">
                     <span className="text-[11.5px] font-medium text-[#9ca3af]">
-                      Entrada a la mesa (Buy-in)
+                      {t(currentLang, 'buyInLabel')}
                     </span>
                     <span className="text-[12px] font-bold text-[#eab308]">
-                      🪙 {selectedBuyIn} fichas
+                      🪙 {selectedBuyIn}{' '}
+                      {currentLang === 'en' ? 'chips' : currentLang === 'it' ? 'chip' : 'fichas'}
                     </span>
                   </div>
                   <div className="grid grid-cols-4 gap-1.5">
@@ -1412,7 +1382,11 @@ export const Lobby: React.FC<LobbyProps> = ({
                   </div>
                   {selectedRoomMode === 'bots' && (
                     <span className="text-[10px] text-[#7c7d85] px-1">
-                      En práctica con bots el buy-in máximo es 100 y la sesión dura máx. 100 manos.
+                      {currentLang === 'en'
+                        ? 'In bot practice, max buy-in is 100 and session lasts max 100 hands.'
+                        : currentLang === 'it'
+                        ? 'Nei tavoli contro i bot il buy-in massimo è 100 e dura max 100 mani.'
+                        : 'En práctica con bots el buy-in máximo es 100 y la sesión dura máx. 100 manos.'}
                     </span>
                   )}
                 </div>
@@ -1422,7 +1396,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                     type="text"
                     value={newRoomName}
                     onChange={(e) => setNewRoomName(e.target.value)}
-                    placeholder="Nombre (ej. Mesa de Amigos)"
+                    placeholder={t(currentLang, 'roomNamePlaceholder')}
                     maxLength={28}
                     className="flex-1 h-10 rounded-full bg-black border border-[#23252a] px-4 text-[13px] text-white placeholder:text-[#7c7d85] focus:outline-none"
                   />
@@ -1432,7 +1406,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                     className="h-10 px-4 rounded-full bg-white text-black text-[13px] font-semibold flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Crear</span>
+                    <span>{t(currentLang, 'createBtn')}</span>
                   </button>
                 </div>
 
@@ -1457,7 +1431,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                     type="text"
                     value={joinInput}
                     onChange={(e) => setJoinInput(e.target.value.toUpperCase())}
-                    placeholder="O únete con código (ej. MESA1)"
+                    placeholder={t(currentLang, 'orJoinWithCode')}
                     maxLength={8}
                     className="flex-1 h-9 rounded-full bg-black border border-[#23252a] px-4 text-[12px] text-white placeholder:text-[#7c7d85] focus:outline-none"
                   />
@@ -1465,7 +1439,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                     type="submit"
                     className="h-9 px-3.5 rounded-full bg-[#23252a] text-white text-[12px] font-medium cursor-pointer"
                   >
-                    Ir
+                    {t(currentLang, 'goBtn')}
                   </button>
                 </form>
               </div>
@@ -1529,7 +1503,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                   </span>
                   {selectedGameForModal.status === 'active' && (
                     <span className="text-[10.5px] text-emerald-400 font-medium">
-                      Multiplayer en vivo y por turnos
+                      {t(currentLang, 'liveAndAsyncAvailable')}
                     </span>
                   )}
                 </div>
@@ -1541,7 +1515,7 @@ export const Lobby: React.FC<LobbyProps> = ({
               {/* Rules / Mechanics */}
               <div className="bg-[#181a20] border border-[#23252a] rounded-[18px] p-3.5 flex flex-col gap-2">
                 <span className="text-[12px] font-semibold text-white flex items-center gap-1.5">
-                  <span>📜 Reglas y Dinámica</span>
+                  <span>{t(currentLang, 'rulesTitle')}</span>
                 </span>
                 <ul className="flex flex-col gap-2">
                   {selectedGameForModal.rules.map((rule, idx) => (
@@ -1567,7 +1541,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                     }}
                     className="flex-1 h-11 rounded-full bg-white text-black font-semibold text-[13px] flex items-center justify-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
                   >
-                    <span>Jugar Mesa de Póker</span>
+                    <span>{t(currentLang, 'playPoker')}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 ) : (
@@ -1584,12 +1558,12 @@ export const Lobby: React.FC<LobbyProps> = ({
                       {votedGameIds.includes(selectedGameForModal.id) ? (
                         <>
                           <Check className="w-4 h-4 text-[#4ade80]" />
-                          <span>¡Votaste por este juego!</span>
+                          <span>{t(currentLang, 'votedPrompt')}</span>
                         </>
                       ) : (
                         <>
                           <span>👍</span>
-                          <span>Votar para que salga primero</span>
+                          <span>{t(currentLang, 'votePrompt')}</span>
                         </>
                       )}
                     </button>
@@ -1598,7 +1572,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                       onClick={() => setSelectedGameForModal(null)}
                       className="h-11 px-4 rounded-full bg-[#181a20] border border-[#23252a] text-[#a1a1aa] text-[12.5px] font-medium hover:text-white cursor-pointer"
                     >
-                      Cerrar
+                      {t(currentLang, 'close')}
                     </button>
                   </>
                 )}

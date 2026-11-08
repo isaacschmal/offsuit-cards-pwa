@@ -26,6 +26,7 @@ import {
   recordHandCompletedStats,
   recordPlayerActionStats,
 } from '../../lib/profile';
+import { formatHandName, type SupportedLanguage, t } from '../../lib/i18n';
 import { AnimatedNumber } from './AnimatedNumber';
 import { Avatar3D } from './Avatar3D';
 import { CommunityCardSlot, HoleCardsBlock } from './PlayingCard';
@@ -57,6 +58,8 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   const [isLeaveConfirmOpen, setIsLeaveConfirmOpen] = useState(false);
   const prevTurnIndexRef = useRef<number>(initialState.currentTurnIndex);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const currentLang: SupportedLanguage = profileState.language ?? 'es';
 
   useEffect(() => {
     const syncProfile = () => {
@@ -427,12 +430,15 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                 {copiedRoomInvite ? (
                   <>
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>¡Link #{tableState.roomId} copiado!</span>
+                    <span>{t(currentLang, 'tableInviteCopied', { id: tableState.roomId })}</span>
                   </>
                 ) : (
                   <>
                     <span>
-                      👥 Sala #{tableState.roomId} ({seatedCount}/6)
+                      {t(currentLang, 'tableRoomInvite', {
+                        id: tableState.roomId,
+                        count: seatedCount,
+                      })}
                     </span>
                     <Share2 className="w-3 h-3 opacity-80" />
                   </>
@@ -440,7 +446,9 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               </button>
             ) : (
               <span className="text-[11px] px-2.5 py-1 rounded-full font-medium border bg-indigo-500/10 border-indigo-500/30 text-indigo-300">
-                🤖 Práctica vs Bots · Mano {Math.min(100, tableState.handNumber)}/100
+                {t(currentLang, 'practiceBotsBadge', {
+                  hand: Math.min(100, tableState.handNumber),
+                })}
               </span>
             )}
           </div>
@@ -452,6 +460,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             isShowdown={tableState.street === 'showdown'}
             showdownContenders={tableState.showdownContenders}
             winningCardIds={tableState.winningCardIds}
+            language={currentLang}
           />
         </div>
 
@@ -522,7 +531,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               !isVacantSeat(currentActor) && (
                 <div className="flex items-center gap-1.5 text-[11.5px] text-[#8e9099]">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  <span>Esperando turno de {currentActor.name}...</span>
+                  <span>{t(currentLang, 'currentTurnWaiting', { name: currentActor.name })}</span>
                 </div>
               )}
           </div>
@@ -538,9 +547,10 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                 >
                   <span>
                     {allBotsEliminated
-                      ? '🏆 ¡Todos los bots eliminados!'
-                      : '🏁 Límite de 100 manos alcanzado'}
-                    {' · '}Retirar {hero.stack} fichas al menú →
+                      ? t(currentLang, 'allBotsEliminated')
+                      : t(currentLang, 'maxHandsReached')}
+                    {' · '}
+                    {t(currentLang, 'cashOutToMenu', { stack: hero.stack })}
                   </span>
                 </button>
               </div>
@@ -554,13 +564,13 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                       className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-amber-500/50 text-amber-300 text-[12.5px] font-medium flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
                     >
                       <span>
-                        Recomprar entrada (+
-                        {Math.min(
-                          profileState.bankroll,
-                          tableState.tableBuyIn ??
-                            (tableState.roomMode === 'bots' ? 100 : 200)
-                        )}
-                        )
+                        {t(currentLang, 'rebuyBuyIn', {
+                          amount: Math.min(
+                            profileState.bankroll,
+                            tableState.tableBuyIn ??
+                              (tableState.roomMode === 'bots' ? 100 : 200)
+                          ),
+                        })}
                       </span>
                     </button>
                     <button
@@ -568,7 +578,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                       onClick={() => onBack(0)}
                       className="h-[46px] px-4 rounded-full bg-[#16171a] border border-[#23252a] text-[#9ca3af] text-[13px] font-medium active:scale-95 cursor-pointer"
                     >
-                      Salir
+                      {t(currentLang, 'exitTable')}
                     </button>
                   </>
                 ) : (
@@ -577,7 +587,13 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                     onClick={() => onBack(0)}
                     className="w-full h-[46px] rounded-full bg-red-500/15 border border-red-500/35 text-red-300 text-[13px] font-medium flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
                   >
-                    <span>Bancarrota (0 fichas) · Salir al menú</span>
+                    <span>
+                      {currentLang === 'en'
+                        ? 'Bankrupt (0 chips) · Exit to menu'
+                        : currentLang === 'it'
+                        ? 'Bancarotta (0 chip) · Esci al menu'
+                        : 'Bancarrota (0 fichas) · Salir al menú'}
+                    </span>
                   </button>
                 )}
               </div>
@@ -588,21 +604,52 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                   onClick={handleDealNextHand}
                   className="w-full h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-medium flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
                 >
-                  <span>
-                    {tableState.winnerIds.includes(hero.id) ||
-                    tableState.winnerIds.includes(profileState.playerId) ||
-                    (resolvedHeroIndex === 0 &&
-                      (tableState.winnerIds.includes('hero') ||
-                        tableState.winnerIds.includes(tableState.players[0]?.id)))
-                      ? `Ganaste ${tableState.collectedPot} fichas`
-                      : `${
-                          tableState.players.find((p) =>
-                            tableState.winnerIds.includes(p.id)
-                          )?.name ?? 'Jugador'
-                        } ganó ${tableState.collectedPot} fichas`}
-                    {tableState.winningHandName ? ` · ${tableState.winningHandName}` : ''}
-                  </span>
-                  <span className="text-[#7c7d85] ml-1">· Siguiente mano →</span>
+                  {(() => {
+                    const isHeroWinner =
+                      tableState.winnerIds.includes(hero.id) ||
+                      tableState.winnerIds.includes(profileState.playerId) ||
+                      (resolvedHeroIndex === 0 &&
+                        (tableState.winnerIds.includes('hero') ||
+                          tableState.winnerIds.includes(tableState.players[0]?.id)));
+                    const winnerName = isHeroWinner
+                      ? currentLang === 'en'
+                        ? 'You'
+                        : currentLang === 'it'
+                        ? 'Hai vinto'
+                        : 'Ganaste'
+                      : tableState.players.find((p) =>
+                          tableState.winnerIds.includes(p.id)
+                        )?.name ?? t(currentLang, 'playerFallback');
+                    const wonText = isHeroWinner
+                      ? currentLang === 'en'
+                        ? `You won ${tableState.collectedPot} chips`
+                        : currentLang === 'it'
+                        ? `Hai vinto ${tableState.collectedPot} chip`
+                        : `Ganaste ${tableState.collectedPot} fichas`
+                      : currentLang === 'en'
+                      ? `${winnerName} won ${tableState.collectedPot} chips`
+                      : currentLang === 'it'
+                      ? `${winnerName} ha vinto ${tableState.collectedPot} chip`
+                      : `${winnerName} ganó ${tableState.collectedPot} fichas`;
+                    const handLabel = tableState.winningHandName
+                      ? ` · ${formatHandName(tableState.winningHandName, currentLang)}`
+                      : '';
+                    const nextHandText =
+                      currentLang === 'en'
+                        ? '· Next hand →'
+                        : currentLang === 'it'
+                        ? '· Prossima mano →'
+                        : '· Siguiente mano →';
+                    return (
+                      <>
+                        <span>
+                          {wonText}
+                          {handLabel}
+                        </span>
+                        <span className="text-[#7c7d85] ml-1">{nextHandText}</span>
+                      </>
+                    );
+                  })()}
                 </button>
               </div>
             )
@@ -685,7 +732,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                 }
                 className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[15px] font-normal active:bg-[#1f2025] disabled:opacity-45 cursor-pointer"
               >
-                {toCall === 0 ? 'Check' : `Call ${toCall}`}
+                {toCall === 0 ? t(currentLang, 'check') : `${t(currentLang, 'call')} ${toCall}`}
               </button>
 
               <button
@@ -696,7 +743,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                 }
                 className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[15px] font-normal active:bg-[#1f2025] disabled:opacity-45 cursor-pointer"
               >
-                Raise {minRaiseBet}
+                {t(currentLang, 'raise')} {minRaiseBet}
               </button>
 
               <button
@@ -762,7 +809,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                       className="w-full h-full flex flex-col items-center justify-between"
                     >
                       <span className="text-[11.5px] font-medium text-[#7c7d85] leading-none">
-                        {heroHandEval.categoryName}
+                        {formatHandName(heroHandEval.categoryName, currentLang)}
                       </span>
 
                       <div className="my-auto relative flex items-center justify-center">
@@ -792,7 +839,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                     >
                       <div className="flex flex-col items-center">
                         <span className="text-[11px] font-medium text-[#7c7d85] leading-tight">
-                          Win
+                          {t(currentLang, 'winOddsTitle')}
                         </span>
                         <span className="text-[20px] font-normal text-[#f59e0b] leading-tight mt-0.5">
                           {heroEquity.winPct}%
@@ -801,7 +848,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
                       <div className="flex flex-col items-center">
                         <span className="text-[11px] font-medium text-[#7c7d85] leading-tight">
-                          {heroEquity.nextHandLabel}
+                          {formatHandName(heroEquity.nextHandLabel, currentLang)}
                         </span>
                         <span className="text-[20px] font-normal text-white leading-tight mt-0.5">
                           {heroEquity.nextHandPct}%
@@ -835,18 +882,10 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             <div className="w-full max-w-[360px] bg-[#16171b] border border-[#282a33] rounded-[24px] p-5 flex flex-col gap-4 shadow-2xl">
               <div className="flex flex-col gap-1.5 text-center">
                 <h3 className="text-[17px] font-semibold text-white">
-                  ¿Salir de la mesa?
+                  {t(currentLang, 'leaveHandTitle')}
                 </h3>
                 <p className="text-[13px] text-[#9ca3af] leading-snug">
-                  Tienes{' '}
-                  <strong className="text-[#eab308] font-semibold">
-                    {hero.totalHandBet} fichas
-                  </strong>{' '}
-                  apostadas en esta mano. Puedes quedarte a terminarla o hacer Fold y salir guardando tus{' '}
-                  <strong className="text-white font-semibold">
-                    {hero.stack} fichas
-                  </strong>{' '}
-                  restantes.
+                  {t(currentLang, 'leaveHandDesc')}
                 </p>
               </div>
 
@@ -856,7 +895,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                   onClick={() => setIsLeaveConfirmOpen(false)}
                   className="w-full h-11 rounded-full bg-white text-black text-[14px] font-semibold active:scale-95 transition-transform cursor-pointer"
                 >
-                  Seguir en la mesa
+                  {t(currentLang, 'stayBtn')}
                 </button>
                 <button
                   type="button"
@@ -866,14 +905,18 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                   }}
                   className="w-full h-11 rounded-full bg-[#1e2028] border border-[#2e313d] text-white text-[13.5px] font-medium active:scale-95 transition-transform cursor-pointer"
                 >
-                  Ir al menú (mantener asiento y fichas)
+                  {currentLang === 'en'
+                    ? 'Return to menu (keep seat & chips)'
+                    : currentLang === 'it'
+                    ? 'Torna al menu (mantieni posto e chip)'
+                    : 'Ir al menú (mantener asiento y fichas)'}
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmFoldAndLeave}
                   className="w-full h-11 rounded-full bg-[#23252a] text-[#ef4444] text-[13.5px] font-semibold active:scale-95 transition-transform cursor-pointer"
                 >
-                  Abandonar y retirar fichas (Fold)
+                  {t(currentLang, 'leaveConfirmBtn')} (Fold)
                 </button>
               </div>
             </div>

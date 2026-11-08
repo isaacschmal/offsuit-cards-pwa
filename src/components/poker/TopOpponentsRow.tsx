@@ -2,6 +2,7 @@ import React from 'react';
 import { formatRank, getSuitSymbol, isRedSuit } from '../../engine/deck';
 import type { ShowdownContenderResult } from '../../engine/poker/gameState';
 import type { Player } from '../../engine/types';
+import { formatHandName, type SupportedLanguage } from '../../lib/i18n';
 import { AnimatedNumber } from './AnimatedNumber';
 import { Avatar3D } from './Avatar3D';
 
@@ -12,6 +13,7 @@ interface TopOpponentsRowProps {
   isShowdown?: boolean;
   showdownContenders?: ShowdownContenderResult[];
   winningCardIds?: string[];
+  language?: SupportedLanguage;
 }
 
 export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
@@ -21,6 +23,7 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
   isShowdown = false,
   showdownContenders = [],
   winningCardIds = [],
+  language = 'es',
 }) => {
   return (
     <div className="grid grid-cols-5 gap-1 w-full pt-0.5">
@@ -171,7 +174,9 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
                     : 'bg-[#1e2028] text-[#9ca3af]'
                 }`}
               >
-                {contender.isWinner ? `🏆 ${contender.handName}` : contender.handName}
+                {contender.isWinner
+                  ? `🏆 ${formatHandName(contender.handName, language)}`
+                  : formatHandName(contender.handName, language)}
               </span>
             ) : null}
 

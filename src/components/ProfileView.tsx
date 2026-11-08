@@ -21,6 +21,7 @@ import {
   upsertKnownPlayer,
 } from '../lib/profile';
 import { isSupabaseConfigured } from '../lib/supabase';
+import { SUPPORTED_LANGUAGES, type SupportedLanguage, t } from '../lib/i18n';
 import { Avatar3D } from './poker/Avatar3D';
 import { OffsuitCardBack } from './poker/PlayingCard';
 
@@ -268,6 +269,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     onProfileChange(next);
   };
 
+  const handleSelectLanguage = (newLang: SupportedLanguage) => {
+    const next = updateUserProfile((prev) => ({ ...prev, language: newLang }));
+    onProfileChange(next);
+  };
+
+  const currentLang = profile.language ?? 'es';
+
   const rankProgressPct = Math.min(
     100,
     Math.max(profile.xp === 0 ? 4 : 12, Math.round(((profile.xp % 250) / 250) * 100))
@@ -417,6 +425,35 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 }`}
                 style={{ backgroundColor: theme.hex }}
               />
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Quick Language Switcher Row */}
+      <div className="mt-2 flex items-center justify-between bg-[#111216] border border-[#1f2127] rounded-[14px] px-3 py-1.5">
+        <span className="text-[11px] text-[#7c7d85] flex items-center gap-1.5">
+          <span>🌐</span>
+          <span>{t(currentLang, 'languageLabel')}</span>
+        </span>
+        <div className="flex items-center gap-1 bg-[#181a20] p-0.5 rounded-full border border-[#23252a]">
+          {SUPPORTED_LANGUAGES.map((lang) => {
+            const isSelected = currentLang === lang.code;
+            return (
+              <button
+                key={lang.code}
+                type="button"
+                onClick={() => handleSelectLanguage(lang.code)}
+                aria-label={`Cambiar idioma a ${lang.label}`}
+                className={`h-6 px-2.5 rounded-full text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-white text-black font-semibold shadow-sm'
+                    : 'text-[#9ca3af] hover:text-white'
+                }`}
+              >
+                <span className="text-[12px]">{lang.flag}</span>
+                <span>{lang.shortLabel}</span>
+              </button>
             );
           })}
         </div>
@@ -1121,7 +1158,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <div className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <span className="text-[16px] font-semibold text-white">
-                Ajustes · Juegos de Cartas
+                {t(currentLang, 'settingsTitle')}
               </span>
               <button
                 type="button"
@@ -1132,9 +1169,37 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </button>
             </div>
 
+            {/* Language Selection Grid */}
+            <div className="bg-black/40 border border-[#23252a] rounded-[16px] p-3 flex flex-col gap-2">
+              <span className="text-[11.5px] font-medium text-[#7c7d85] flex items-center gap-1.5">
+                <span>🌐</span>
+                <span>{t(currentLang, 'languageLabel')}</span>
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                {SUPPORTED_LANGUAGES.map((lang) => {
+                  const isSelected = currentLang === lang.code;
+                  return (
+                    <button
+                      key={lang.code}
+                      type="button"
+                      onClick={() => handleSelectLanguage(lang.code)}
+                      className={`h-10 rounded-[12px] border text-[12px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-white text-black border-white font-semibold shadow-sm'
+                          : 'bg-[#181a20] text-[#9ca3af] border-[#252830] hover:text-white'
+                      }`}
+                    >
+                      <span className="text-base">{lang.flag}</span>
+                      <span>{lang.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="bg-black/40 border border-[#23252a] rounded-[16px] p-3.5 flex flex-col gap-1.5 text-[12px]">
               <div className="flex items-center justify-between">
-                <span className="text-[#7c7d85]">Sincronización de Salas</span>
+                <span className="text-[#7c7d85]">{t(currentLang, 'networkStatus')}</span>
                 <span className="text-emerald-400 font-medium">
                   {isPartyKitConfigured
                     ? 'PartyKit Cloudflare WS'
@@ -1144,15 +1209,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-[#7c7d85]">Notificaciones de Turno</span>
+                <span className="text-[#7c7d85]">{t(currentLang, 'turnNotifications')}</span>
                 <button
                   type="button"
                   onClick={() => void requestTurnNotificationPermission()}
                   className="text-[#eab308] underline cursor-pointer"
                 >
                   {getNotificationPermission() === 'granted'
-                    ? 'Activadas'
-                    : 'Activar ahora'}
+                    ? t(currentLang, 'notifEnabled')
+                    : t(currentLang, 'notifEnableNow')}
                 </button>
               </div>
             </div>

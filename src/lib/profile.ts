@@ -1,4 +1,5 @@
 import type { PlayerActionInput, PokerTableState } from '../engine/poker/gameState';
+import { detectDeviceLanguage, type SupportedLanguage } from './i18n';
 
 export type CardBackColorId = 'slate' | 'indigo' | 'emerald' | 'crimson';
 
@@ -70,6 +71,7 @@ export interface UserProfilePreferences {
   hasSetCustomName: boolean;
   avatarId: string;
   cardBackColor: CardBackColorId;
+  language: SupportedLanguage;
   xp: number;
   level: number;
   bankroll: number;
@@ -93,6 +95,7 @@ export const DEFAULT_USER_PROFILE: UserProfilePreferences = {
   hasSetCustomName: false,
   avatarId: 'hero',
   cardBackColor: 'slate',
+  language: detectDeviceLanguage(),
   xp: 0,
   level: 1,
   bankroll: 1000,
@@ -119,6 +122,7 @@ export function generateAccountSyncToken(profile: UserProfilePreferences): strin
       hasSetCustomName: profile.hasSetCustomName,
       avatarId: profile.avatarId,
       cardBackColor: profile.cardBackColor,
+      language: profile.language,
       xp: profile.xp,
       level: profile.level,
       bankroll: profile.bankroll,
@@ -142,6 +146,10 @@ export function restoreAccountFromSyncToken(token: string): UserProfilePreferenc
       ...data,
       playerId: data.id,
       hasSetCustomName: true,
+      language:
+        data.language === 'en' || data.language === 'es' || data.language === 'it'
+          ? data.language
+          : detectDeviceLanguage(),
       bankroll: typeof data.bankroll === 'number' ? data.bankroll : 1000,
       stats: {
         ...DEFAULT_USER_PROFILE.stats,
@@ -238,11 +246,17 @@ export function loadUserProfile(): UserProfilePreferences {
       resolvedBankroll = 1000;
     }
 
+    const resolvedLanguage: SupportedLanguage =
+      parsed.language === 'en' || parsed.language === 'es' || parsed.language === 'it'
+        ? parsed.language
+        : detectDeviceLanguage();
+
     const resolved: UserProfilePreferences = {
       ...DEFAULT_USER_PROFILE,
       ...parsed,
       playerId: resolvedPlayerId,
       hasSetCustomName: Boolean(parsed.hasSetCustomName),
+      language: resolvedLanguage,
       bankroll: resolvedBankroll,
       friends: Array.isArray(parsed.friends) ? parsed.friends : [],
       stats: {
