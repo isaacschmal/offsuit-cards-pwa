@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowUp, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { calculateHoldemEquity } from '../../engine/poker/equity';
@@ -20,6 +21,7 @@ import {
   recordHandCompletedStats,
   recordPlayerActionStats,
 } from '../../lib/profile';
+import { AnimatedNumber } from './AnimatedNumber';
 import { Avatar3D } from './Avatar3D';
 import { CommunityCardSlot, HoleCardsBlock } from './PlayingCard';
 import { TopOpponentsRow } from './TopOpponentsRow';
@@ -45,8 +47,17 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   const [isSliderOpen, setIsSliderOpen] = useState(false);
   const [sliderAmount, setSliderAmount] = useState<number>(initialState.minRaiseTo);
   const [hudOddsMode, setHudOddsMode] = useState<boolean>(false);
-  const [heroAvatarId] = useState<string>(() => loadUserProfile().avatarId);
+  const [heroAvatarId, setHeroAvatarId] = useState<string>(() => loadUserProfile().avatarId);
   const prevTurnIndexRef = useRef<number>(initialState.currentTurnIndex);
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const syncProfile = () => {
+      setHeroAvatarId(loadUserProfile().avatarId);
+    };
+    window.addEventListener('cartas-profile-updated', syncProfile);
+    return () => window.removeEventListener('cartas-profile-updated', syncProfile);
+  }, []);
 
   useEffect(() => {
     if (externalState) {
@@ -56,6 +67,9 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
   const hero = tableState.players[0];
   const opponents = tableState.players.slice(1, 6);
+  const currentActor = tableState.players[tableState.currentTurnIndex];
+  const isRealFriendsRoom = tableState.roomMode === 'real';
+
   const isHeroTurn =
     tableState.street !== 'showdown' &&
     tableState.currentTurnIndex === 0 &&
@@ -93,10 +107,9 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     roomName,
   ]);
 
-  // Sequential bot turn automation (~550ms per opponent)
+  // Sequential bot turn automation (~550ms per opponent) ONLY when seat is a bot (Práctica vs Bots mode)
   useEffect(() => {
     if (tableState.street === 'showdown') return;
-    const currentActor = tableState.players[tableState.currentTurnIndex];
     if (!currentActor || !currentActor.isBot || currentActor.status !== 'active') {
       return;
     }
@@ -113,7 +126,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     }, 550);
 
     return () => window.clearTimeout(timer);
-  }, [tableState, hero.id, onBroadcastState]);
+  }, [tableState, currentActor, hero.id, onBroadcastState]);
 
   // Evaluate Hero's current hand & Monte Carlo equity
   const heroHandEval = useMemo(() => {
@@ -166,6 +179,20 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     onBroadcastState?.(next);
   };
 
+  // In a Real Friends room (sin bots), allow advancing a friend's seat manually if testing on 1 device
+  const handleFriendSeatAction = (action: PlayerActionInput) => {
+    if (tableState.street === 'showdown' || !currentActor || currentActor.id === hero.id) {
+      return;
+    }
+    const next = applyPlayerAction(tableState, currentActor.id, action);
+    if (next.street === 'showdown') {
+      recordHandCompletedStats(next, hero.id);
+    }
+    setTableState(next);
+    savePersistedRoomState(next.roomId, next);
+    onBroadcastState?.(next);
+  };
+
   const handlePresetSelect = (preset: '1bb' | 'half-pot' | 'pot') => {
     const totalPot = getTotalPot(tableState);
     let target = minRaiseBet;
@@ -192,12 +219,65 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     onBroadcastState?.(next);
   };
 
+  // Swipe handlers for the bottom-right personal widget (NO click/tap toggle)
+  const handleWidgetPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    swipeStartRef.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleWidgetPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!swipeStartRef.current) return;
+    const deltaX = e.clientX - swipeStartRef.current.x;
+    const deltaY = e.clientY - swipeStartRef.current.y;
+    swipeStartRef.current = null;
+
+    // Require an intentional swipe gesture (> 18px vertically or > 20px horizontally)
+    if (deltaY < -18 || deltaX < -20) {
+      setHudOddsMode(true);
+    } else if (deltaY > 18 || deltaX > 20) {
+      setHudOddsMode(false);
+    }
+  };
+
+  const handleWidgetTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const touch = e.touches[0];
+    if (touch) {
+      swipeStartRef.current = { x: touch.clientX, y: touch.clientY };
+    }
+  };
+
+  const handleWidgetTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!swipeStartRef.current) return;
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    const deltaX = touch.clientX - swipeStartRef.current.x;
+    const deltaY = touch.clientY - swipeStartRef.current.y;
+    swipeStartRef.current = null;
+
+    if (deltaY < -18 || deltaX < -20) {
+      setHudOddsMode(true);
+    } else if (deltaY > 18 || deltaX > 20) {
+      setHudOddsMode(false);
+    }
+  };
+
+  const handleWidgetWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY > 10 || e.deltaX > 10) {
+      setHudOddsMode(true);
+    } else if (e.deltaY < -10 || e.deltaX < -10) {
+      setHudOddsMode(false);
+    }
+  };
+
+  const friendToCall = currentActor
+    ? Math.max(0, tableState.currentHighestBet - currentActor.currentBet)
+    : 0;
+
   return (
     <div className="min-h-[100dvh] w-full bg-black text-white flex justify-center select-none">
       <div className="w-full max-w-[420px] min-h-[100dvh] flex flex-col justify-between px-4 pt-3 pb-6">
-        {/* TOP SECTION: Back Arrow ONLY + 5 Opponents Row */}
+        {/* TOP SECTION: Back Arrow + Mode Badge + 5 Opponents Row */}
         <div>
-          <div className="h-10 flex items-center justify-start mb-2">
+          <div className="h-10 flex items-center justify-between mb-2">
             <button
               type="button"
               onClick={onBack}
@@ -206,6 +286,18 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             >
               <ArrowLeft className="w-6 h-6 stroke-[2]" />
             </button>
+
+            <span
+              className={`text-[11px] px-2.5 py-1 rounded-full font-medium border ${
+                isRealFriendsRoom
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300'
+              }`}
+            >
+              {isRealFriendsRoom
+                ? `👥 Solo Reales · #${tableState.roomId}`
+                : '🤖 Práctica vs Bots'}
+            </span>
           </div>
 
           <TopOpponentsRow
@@ -216,13 +308,14 @@ export const PokerTable: React.FC<PokerTableProps> = ({
           />
         </div>
 
-        {/* CENTER SECTION: 5 Community Cards + Bare Pot Number */}
+        {/* CENTER SECTION: 5 Community Cards + Bare Animated Pot Number */}
         <div className="my-auto py-4">
           <div className="grid grid-cols-5 items-center w-full">
             {[0, 1, 2, 3, 4].map((slotIdx) => (
               <CommunityCardSlot
                 key={slotIdx}
                 index={slotIdx}
+                handNumber={tableState.handNumber}
                 card={tableState.communityCards[slotIdx]}
               />
             ))}
@@ -230,21 +323,52 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
           {/* Bare Pot Number directly below the 5th (rightmost) community card */}
           <div className="w-full flex justify-end pr-2 mt-2.5">
-            <span className="text-[22px] font-normal text-white leading-none">
-              {tableState.collectedPot}
-            </span>
+            <AnimatedNumber
+              value={tableState.collectedPot}
+              className="text-[22px] font-normal text-white leading-none"
+            />
           </div>
         </div>
 
         {/* BOTTOM SECTION: Action Controls + Split 2-Column HUD */}
         <div className="flex flex-col gap-3.5">
           {/* Hero's own current round bet badge above the left button (IMG_8411, IMG_8413) */}
-          <div className="h-[24px] flex items-center pl-4">
-            {hero.currentBet > 0 && (
-              <div className="min-w-[24px] h-[24px] px-1.5 rounded-full bg-[#1a1b1f] text-[#eab308] text-[12px] font-semibold flex items-center justify-center">
-                {hero.currentBet}
-              </div>
-            )}
+          <div className="h-[24px] flex items-center justify-between px-2">
+            <div>
+              {hero.currentBet > 0 && (
+                <div className="min-w-[24px] h-[24px] px-1.5 rounded-full bg-[#1a1b1f] text-[#eab308] text-[12px] font-semibold flex items-center justify-center">
+                  <AnimatedNumber value={hero.currentBet} />
+                </div>
+              )}
+            </div>
+
+            {/* In Real Friends Mode (sin bots), when waiting on a friend's seat, show clear status + pass turn helper */}
+            {isRealFriendsRoom &&
+              tableState.street !== 'showdown' &&
+              currentActor &&
+              currentActor.id !== hero.id && (
+                <div className="flex items-center gap-2 text-[11px] text-[#9ca3af]">
+                  <span>Esperando a {currentActor.name}...</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleFriendSeatAction({
+                        type: friendToCall === 0 ? 'check' : 'call',
+                      })
+                    }
+                    className="px-2 py-0.5 rounded-full bg-[#1f2128] border border-[#2e313b] text-white font-medium cursor-pointer active:scale-95"
+                  >
+                    {friendToCall === 0 ? 'Check' : `Call ${friendToCall}`} ({currentActor.name})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFriendSeatAction({ type: 'fold' })}
+                    className="px-2 py-0.5 rounded-full bg-[#1f2128] border border-[#2e313b] text-[#ef4444] font-medium cursor-pointer active:scale-95"
+                  >
+                    Fold
+                  </button>
+                </div>
+              )}
           </div>
 
           {/* Action Controls Row */}
@@ -373,71 +497,95 @@ export const PokerTable: React.FC<PokerTableProps> = ({
             </div>
           )}
 
-          {/* BOTTOM SPLIT HUD: Left (2 Draggable/Flickable Hole Cards) | Right (Tappable Player/Odds Card) */}
+          {/* BOTTOM SPLIT HUD: Left (2 Draggable/Flickable Hole Cards) | Right (Swipeable Player/Odds Widget) */}
           <div className="grid grid-cols-2 gap-3 h-[142px] items-stretch relative">
-            {/* Left Column: Unified 2 Hole Cards with Throw-to-Fold upward flick gesture */}
+            {/* Left Column: Unified 2 Hole Cards with dealing animation + Throw-to-Fold upward flick gesture */}
             <HoleCardsBlock
               cards={hero.holeCards}
+              handNumber={tableState.handNumber}
               folded={hero.status === 'folded'}
               canDragToFold={isHeroTurn}
               onFoldTrigger={() => handleHeroAction({ type: 'fold' })}
             />
 
-            {/* Right Column: Dark Rounded HUD Container */}
+            {/* Right Column: Swipeable Dark Rounded HUD Container (Swipe Up/Down or Left/Right to switch faces) */}
             <div className="relative h-[142px]">
-              <button
-                type="button"
-                onClick={() => setHudOddsMode((prev) => !prev)}
-                className="w-full h-full bg-[#16171a] rounded-[24px] py-3 px-4 flex flex-col items-center justify-between text-center active:scale-[0.99] transition-transform cursor-pointer"
+              <div
+                role="region"
+                aria-label="Desliza para cambiar entre ficha de jugador y probabilidades"
+                onPointerDown={handleWidgetPointerDown}
+                onPointerUp={handleWidgetPointerUp}
+                onTouchStart={handleWidgetTouchStart}
+                onTouchEnd={handleWidgetTouchEnd}
+                onWheel={handleWidgetWheel}
+                className="w-full h-full bg-[#16171a] rounded-[24px] py-3 px-4 flex flex-col items-center justify-between text-center overflow-hidden touch-none select-none cursor-ns-resize"
               >
-                {!hudOddsMode ? (
-                  /* VIEW 1: Hand Category + 3D Avatar + Bare Stack Number (IMG_8408, IMG_8409, IMG_8413) */
-                  <>
-                    <span className="text-[12px] font-medium text-[#7c7d85] leading-none">
-                      {heroHandEval.categoryName}
-                    </span>
+                <AnimatePresence mode="wait" initial={false}>
+                  {!hudOddsMode ? (
+                    /* FACE 1: Hand Category + 3D Avatar + Animated Stack with Red/Green Flash */
+                    <motion.div
+                      key="hud-face-avatar"
+                      initial={{ opacity: 0, y: -22 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -22 }}
+                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                      className="w-full h-full flex flex-col items-center justify-between"
+                    >
+                      <span className="text-[12px] font-medium text-[#7c7d85] leading-none">
+                        {heroHandEval.categoryName}
+                      </span>
 
-                    <div className="my-auto flex items-center justify-center">
-                      <Avatar3D avatarId={heroAvatarId} size={48} />
-                    </div>
+                      <div className="my-auto flex items-center justify-center">
+                        <Avatar3D avatarId={heroAvatarId} size={48} />
+                      </div>
 
-                    <span className="text-[20px] font-normal text-white leading-none">
-                      {hero.stack}
-                    </span>
-                  </>
-                ) : (
-                  /* VIEW 2: Odds Mode — Win % in amber/gold + Next Hand % in white (IMG_8410, IMG_8411) */
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-2.5">
-                    <div className="flex flex-col items-center">
-                      <span className="text-[12px] font-medium text-[#7c7d85] leading-tight">
-                        Win
-                      </span>
-                      <span className="text-[22px] font-normal text-[#f59e0b] leading-tight mt-0.5">
-                        {heroEquity.winPct}%
-                      </span>
-                    </div>
+                      <AnimatedNumber
+                        value={hero.stack}
+                        flashColorOnChange={true}
+                        className="text-[20px] font-normal leading-none"
+                      />
+                    </motion.div>
+                  ) : (
+                    /* FACE 2: Odds Mode — Win % in amber/gold + Next Hand % in white */
+                    <motion.div
+                      key="hud-face-odds"
+                      initial={{ opacity: 0, y: 22 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 22 }}
+                      transition={{ duration: 0.2, ease: 'easeOut' }}
+                      className="w-full h-full flex flex-col items-center justify-center gap-2.5"
+                    >
+                      <div className="flex flex-col items-center">
+                        <span className="text-[12px] font-medium text-[#7c7d85] leading-tight">
+                          Win
+                        </span>
+                        <span className="text-[22px] font-normal text-[#f59e0b] leading-tight mt-0.5">
+                          {heroEquity.winPct}%
+                        </span>
+                      </div>
 
-                    <div className="flex flex-col items-center">
-                      <span className="text-[12px] font-medium text-[#7c7d85] leading-tight">
-                        {heroEquity.nextHandLabel}
-                      </span>
-                      <span className="text-[22px] font-normal text-white leading-tight mt-0.5">
-                        {heroEquity.nextHandPct}%
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </button>
+                      <div className="flex flex-col items-center">
+                        <span className="text-[12px] font-medium text-[#7c7d85] leading-tight">
+                          {heroEquity.nextHandLabel}
+                        </span>
+                        <span className="text-[22px] font-normal text-white leading-tight mt-0.5">
+                          {heroEquity.nextHandPct}%
+                        </span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
 
               {/* Tiny 2 vertical pagination dots on far right edge (IMG_8410) */}
               <div className="absolute -right-2.5 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 pointer-events-none">
                 <span
-                  className={`w-1 h-1 rounded-full ${
+                  className={`w-1 h-1 rounded-full transition-colors ${
                     !hudOddsMode ? 'bg-white' : 'bg-[#3f414a]'
                   }`}
                 />
                 <span
-                  className={`w-1 h-1 rounded-full ${
+                  className={`w-1 h-1 rounded-full transition-colors ${
                     hudOddsMode ? 'bg-white' : 'bg-[#3f414a]'
                   }`}
                 />

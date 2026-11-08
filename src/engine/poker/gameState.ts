@@ -9,8 +9,11 @@ export interface SidePot {
   eligiblePlayerIds: string[];
 }
 
+export type RoomPlayersMode = 'real' | 'bots';
+
 export interface PokerTableState {
   roomId: string;
+  roomMode?: RoomPlayersMode;
   players: Player[]; // index 0 is local hero, 1..5 are top row left-to-right (Emma, Leo, Akash, Tori, Evelyn)
   deck: Card[];
   communityCards: Card[]; // 0, 3, 4, or 5 revealed cards
@@ -43,7 +46,11 @@ export const DEFAULT_OPPONENTS = [
   { id: 'bot-evelyn', name: 'Evelyn', avatarId: 'evelyn' },
 ];
 
-export function createInitialTableState(roomId = 'local-offsuit'): PokerTableState {
+export function createInitialTableState(
+  roomId = 'local-offsuit',
+  roomMode: RoomPlayersMode = 'bots'
+): PokerTableState {
+  const isBotSeat = roomMode === 'bots';
   const players: Player[] = [
     {
       id: 'hero',
@@ -68,13 +75,14 @@ export function createInitialTableState(roomId = 'local-offsuit'): PokerTableSta
       holeCards: [],
       status: 'active' as const,
       lastAction: null,
-      isBot: true,
+      isBot: isBotSeat,
       seatIndex: idx + 1,
     })),
   ];
 
   const baseState: PokerTableState = {
     roomId,
+    roomMode,
     players,
     deck: [],
     communityCards: [],

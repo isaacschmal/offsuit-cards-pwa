@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Player } from '../../engine/types';
+import { AnimatedNumber } from './AnimatedNumber';
 import { Avatar3D } from './Avatar3D';
 
 interface TopOpponentsRowProps {
@@ -81,20 +82,20 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
               {opp.name}
             </span>
 
-            {/* Stack count directly below in white */}
+            {/* Stack count directly below in white (smoothly animated) */}
             <span
               className={`mt-0.5 text-[13px] font-medium leading-tight text-white ${
                 isFolded ? 'opacity-30' : 'opacity-100'
               }`}
             >
-              {opp.stack}
+              <AnimatedNumber value={opp.stack} />
             </span>
 
             {/* Current round bet badge in small dark circle with yellow/gold number */}
             <div className="h-[28px] mt-2 flex items-center justify-center">
               {opp.currentBet > 0 && (
                 <div className="min-w-[24px] h-[24px] px-1.5 rounded-full bg-[#1a1b1f] text-[#eab308] text-[12px] font-semibold flex items-center justify-center">
-                  {opp.currentBet}
+                  <AnimatedNumber value={opp.currentBet} />
                 </div>
               )}
             </div>

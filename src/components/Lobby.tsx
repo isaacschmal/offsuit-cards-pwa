@@ -6,6 +6,7 @@ import {
   loadOpenRooms,
   type OpenRoomInfo,
   type RoomPacingMode,
+  type RoomPlayersMode,
   requestTurnNotificationPermission,
   subscribeToOpenRoomsDirectory,
 } from '../lib/multiplayer';
@@ -24,7 +25,8 @@ interface LobbyProps {
   onJoinOrCreateRoom: (
     roomCode: string,
     pacingMode?: RoomPacingMode,
-    roomName?: string
+    roomName?: string,
+    roomMode?: RoomPlayersMode
   ) => void;
 }
 
@@ -45,6 +47,8 @@ export const Lobby: React.FC<LobbyProps> = ({
   const [isRoomsModalOpen, setIsRoomsModalOpen] = useState(false);
   const [selectedPacing, setSelectedPacing] =
     useState<RoomPacingMode>(activePacingMode);
+  const [selectedRoomMode, setSelectedRoomMode] =
+    useState<RoomPlayersMode>('real');
   const [newRoomName, setNewRoomName] = useState('');
   const [joinInput, setJoinInput] = useState('');
   const [notifPerm, setNotifPerm] = useState<
@@ -73,15 +77,29 @@ export const Lobby: React.FC<LobbyProps> = ({
   const handleCreateRoom = () => {
     const label =
       newRoomName.trim() ||
-      (selectedPacing === 'async' ? 'Mesa por Turnos' : 'Mesa en Vivo');
-    const created = createNewOpenRoom(label, selectedPacing);
+      (selectedRoomMode === 'bots'
+        ? 'Práctica con Bots'
+        : selectedPacing === 'async'
+        ? 'Mesa por Turnos'
+        : 'Mesa en Vivo');
+    const created = createNewOpenRoom(
+      label,
+      selectedPacing,
+      undefined,
+      selectedRoomMode
+    );
     setOpenRooms(loadOpenRooms());
     setNewRoomName('');
     setIsRoomsModalOpen(false);
     if (selectedPacing === 'async' && notifPerm === 'default') {
       void requestTurnNotificationPermission().then(setNotifPerm);
     }
-    onJoinOrCreateRoom(created.code, created.pacingMode, created.name);
+    onJoinOrCreateRoom(
+      created.code,
+      created.pacingMode,
+      created.name,
+      created.roomMode
+    );
   };
 
   // Level ring SVG math (radius 15, circumference ~94.25)
@@ -193,23 +211,30 @@ export const Lobby: React.FC<LobbyProps> = ({
               </span>
             </div>
 
-            {/* HORIZONTAL PASTEL GRADIENT CARDS CAROUSEL */}
+            {/* HORIZONTAL PASTEL GRADIENT CARDS CAROUSEL (Strictly separated Real vs Bots) */}
             <div className="flex gap-3.5 overflow-x-auto no-scrollbar -mx-5 px-5 pb-2 snap-x snap-mandatory">
-              {/* Card 1: Mesas en Vivo */}
+              {/* Card 1: Mesas en Vivo (Solo Reales · Sin Bots) */}
               <button
                 type="button"
                 onClick={() => {
-                  const liveRoom =
-                    openRooms.find((r) => r.pacingMode === 'live') ??
-                    openRooms[0];
-                  if (liveRoom) {
+                  const liveRealRoom =
+                    openRooms.find(
+                      (r) => r.pacingMode === 'live' && r.roomMode === 'real'
+                    ) ?? openRooms[0];
+                  if (liveRealRoom) {
                     onJoinOrCreateRoom(
-                      liveRoom.code,
+                      liveRealRoom.code,
                       'live',
-                      liveRoom.name
+                      liveRealRoom.name,
+                      'real'
                     );
                   } else {
-                    onStartInstantTable();
+                    onJoinOrCreateRoom(
+                      'PRIMOS',
+                      'live',
+                      'Mesa de los Primos',
+                      'real'
+                    );
                   }
                 }}
                 style={{
@@ -220,11 +245,14 @@ export const Lobby: React.FC<LobbyProps> = ({
               >
                 <div className="flex items-start justify-between w-full">
                   <div>
+                    <span className="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1.5">
+                      👥 Solo Reales · En Vivo
+                    </span>
                     <h2 className="text-[22px] font-semibold tracking-tight text-[#0f172a] leading-tight">
                       Mesas en Vivo
                     </h2>
-                    <p className="text-[13px] text-[#334155] mt-1 leading-snug max-w-[190px]">
-                      Juega rápido con amigos conectados
+                    <p className="text-[13px] text-[#334155] mt-1 leading-snug max-w-[195px]">
+                      Juega con amigos reales conectados (sin bots)
                     </p>
                   </div>
                   <span className="text-[26px] leading-none">🌎</span>
@@ -253,24 +281,26 @@ export const Lobby: React.FC<LobbyProps> = ({
                 </div>
               </button>
 
-              {/* Card 2: Por Turnos (Async Chess-Style) */}
+              {/* Card 2: Por Turnos (Solo Reales · 24h Async Chess-Style) */}
               <button
                 type="button"
                 onClick={() => {
                   const asyncRoom = openRooms.find(
-                    (r) => r.pacingMode === 'async'
+                    (r) => r.pacingMode === 'async' && r.roomMode === 'real'
                   );
                   if (asyncRoom) {
                     onJoinOrCreateRoom(
                       asyncRoom.code,
                       'async',
-                      asyncRoom.name
+                      asyncRoom.name,
+                      'real'
                     );
                   } else {
                     onJoinOrCreateRoom(
                       'TURNOS',
                       'async',
-                      'Ajedrez de Cartas (Por Turnos)'
+                      'Ajedrez de Cartas (Por Turnos)',
+                      'real'
                     );
                   }
                 }}
@@ -282,11 +312,14 @@ export const Lobby: React.FC<LobbyProps> = ({
               >
                 <div className="flex items-start justify-between w-full">
                   <div>
+                    <span className="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1.5">
+                      👥 Solo Reales · 24h
+                    </span>
                     <h2 className="text-[22px] font-semibold tracking-tight text-[#0f172a] leading-tight">
                       Por Turnos
                     </h2>
-                    <p className="text-[13px] text-[#334155] mt-1 leading-snug max-w-[190px]">
-                      Sin prisa, te avisa cuando te toca
+                    <p className="text-[13px] text-[#334155] mt-1 leading-snug max-w-[195px]">
+                      Sin prisa entre amigos, te avisa cuando te toca
                     </p>
                   </div>
                   <span className="text-[26px] leading-none">⏳</span>
@@ -294,7 +327,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
                 <div className="flex items-center justify-between w-full pt-2">
                   <div className="flex items-center gap-1.5 text-[12px] font-medium text-[#334155]">
-                    <span>Estilo ajedrez · 24h</span>
+                    <span>Estilo ajedrez · Sin bots</span>
                   </div>
                   <span className="h-8 px-3.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[12px] font-semibold flex items-center">
                     Entrar →
@@ -302,10 +335,12 @@ export const Lobby: React.FC<LobbyProps> = ({
                 </div>
               </button>
 
-              {/* Card 3: Crear / Salas Abiertas */}
+              {/* Card 3: Práctica vs Bots (Dedicated Solo AI Mode) */}
               <button
                 type="button"
-                onClick={() => setIsRoomsModalOpen(true)}
+                onClick={() => {
+                  onStartInstantTable();
+                }}
                 style={{
                   background:
                     'linear-gradient(135deg, #fef3c7 0%, #ffedd5 100%)',
@@ -314,28 +349,31 @@ export const Lobby: React.FC<LobbyProps> = ({
               >
                 <div className="flex items-start justify-between w-full">
                   <div>
+                    <span className="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] mb-1.5">
+                      🤖 Modo Bots
+                    </span>
                     <h2 className="text-[22px] font-semibold tracking-tight text-[#0f172a] leading-tight">
-                      Crear / Salas Abiertas
+                      Práctica vs Bots
                     </h2>
                     <p className="text-[13px] text-[#334155] mt-1 leading-snug max-w-[195px]">
-                      Mesa de los Primos, Torneo Semanal o crea tu sala
+                      Entrena jugadas al instante contra los 5 bots IA
                     </p>
                   </div>
-                  <span className="text-[26px] leading-none">🃏</span>
+                  <span className="text-[26px] leading-none">🤖</span>
                 </div>
 
                 <div className="flex items-center justify-between w-full pt-2">
                   <span className="text-[12px] font-medium text-[#334155]">
-                    {openRooms.length} salas activas
+                    5 Bots IA · Turnos rápidos
                   </span>
                   <span className="h-8 px-3.5 rounded-full bg-[#0f172a]/10 text-[#0f172a] text-[12px] font-semibold flex items-center">
-                    Abrir →
+                    Practicar →
                   </span>
                 </div>
               </button>
             </div>
 
-            {/* ACTIVE OPEN ROOM QUICK BANNER (1-Tap Join) */}
+            {/* ACTIVE OPEN ROOM QUICK BANNER (1-Tap Join or View All Rooms) */}
             {primaryOpenRoom && (
               <div className="mt-3.5 bg-[#121316] border border-[#23252a] rounded-[20px] px-4 py-3 flex items-center justify-between gap-2">
                 <button
@@ -343,31 +381,46 @@ export const Lobby: React.FC<LobbyProps> = ({
                   onClick={() => setIsRoomsModalOpen(true)}
                   className="flex flex-col text-left min-w-0 cursor-pointer"
                 >
-                  <span className="text-[13px] font-medium text-white truncate">
-                    Sala abierta: {primaryOpenRoom.name} ·{' '}
-                    {primaryOpenRoom.playerCount}/{primaryOpenRoom.maxPlayers}{' '}
-                    jugadores
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[13px] font-medium text-white truncate">
+                      {primaryOpenRoom.name}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-medium shrink-0">
+                      {primaryOpenRoom.roomMode === 'bots'
+                        ? '🤖 Bots'
+                        : '👥 Solo Reales'}
+                    </span>
+                  </div>
                   <span className="text-[11px] text-[#7c7d85] mt-0.5">
                     #{primaryOpenRoom.code} · Ciegas{' '}
-                    {primaryOpenRoom.blindsLabel} · Turno:{' '}
-                    {primaryOpenRoom.currentTurnPlayerName}
+                    {primaryOpenRoom.blindsLabel} · Ver todas las salas (
+                    {openRooms.length})
                   </span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    onJoinOrCreateRoom(
-                      primaryOpenRoom.code,
-                      primaryOpenRoom.pacingMode,
-                      primaryOpenRoom.name
-                    )
-                  }
-                  className="h-8 px-3.5 rounded-full bg-white text-black text-[12px] font-semibold shrink-0 active:scale-95 transition-transform cursor-pointer"
-                >
-                  Unirse
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsRoomsModalOpen(true)}
+                    className="h-8 px-3 rounded-full bg-[#23252a] text-white text-[12px] font-medium active:scale-95 transition-transform cursor-pointer"
+                  >
+                    Salas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onJoinOrCreateRoom(
+                        primaryOpenRoom.code,
+                        primaryOpenRoom.pacingMode,
+                        primaryOpenRoom.name,
+                        primaryOpenRoom.roomMode
+                      )
+                    }
+                    className="h-8 px-3.5 rounded-full bg-white text-black text-[12px] font-semibold active:scale-95 transition-transform cursor-pointer"
+                  >
+                    Unirse
+                  </button>
+                </div>
               </div>
             )}
 
@@ -470,7 +523,7 @@ export const Lobby: React.FC<LobbyProps> = ({
           </button>
         </nav>
 
-        {/* MODAL / DRAWER FOR CREAR / SALAS ABIERTAS (1-Tap Join or Create Room) */}
+        {/* MODAL / DRAWER FOR CREAR / SALAS ABIERTAS (1-Tap Join or Create Room with Real vs Bots selector) */}
         {isRoomsModalOpen && (
           <div className="fixed inset-0 z-50 bg-black/80 flex items-end justify-center p-4">
             <div className="w-full max-w-[400px] bg-[#16171a] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4 max-h-[85dvh] overflow-y-auto">
@@ -480,7 +533,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                     Salas Abiertas &amp; Crear Mesa
                   </h3>
                   <p className="text-[12px] text-[#7c7d85]">
-                    Únete con 1 toque sin código o crea una nueva sala
+                    Mesas reales con amigos o práctica con bots
                   </p>
                 </div>
                 <button
@@ -504,21 +557,33 @@ export const Lobby: React.FC<LobbyProps> = ({
                       onJoinOrCreateRoom(
                         room.code,
                         room.pacingMode,
-                        room.name
+                        room.name,
+                        room.roomMode
                       );
                     }}
                     className="w-full rounded-[18px] px-3.5 py-3 bg-black/50 border border-[#23252a] hover:border-white/30 flex items-center justify-between text-left cursor-pointer"
                   >
                     <div className="flex flex-col">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[14px] font-medium text-white">
                           {room.name}
                         </span>
                         <span
                           className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                            room.roomMode === 'bots'
+                              ? 'bg-indigo-500/15 text-indigo-300'
+                              : 'bg-emerald-500/15 text-emerald-400'
+                          }`}
+                        >
+                          {room.roomMode === 'bots'
+                            ? '🤖 Bots'
+                            : '👥 Solo Reales'}
+                        </span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
                             room.pacingMode === 'async'
                               ? 'bg-[#eab308]/15 text-[#eab308]'
-                              : 'bg-emerald-500/15 text-emerald-400'
+                              : 'bg-white/10 text-white/80'
                           }`}
                         >
                           {room.pacingMode === 'async'
@@ -532,7 +597,7 @@ export const Lobby: React.FC<LobbyProps> = ({
                       </span>
                     </div>
 
-                    <span className="h-7 px-3 rounded-full bg-white text-black text-[12px] font-semibold flex items-center">
+                    <span className="h-7 px-3 rounded-full bg-white text-black text-[12px] font-semibold flex items-center shrink-0">
                       Unirse
                     </span>
                   </button>
@@ -561,6 +626,33 @@ export const Lobby: React.FC<LobbyProps> = ({
                   )}
                 </div>
 
+                {/* Selector 1: Solo Amigos Reales vs Con Bots */}
+                <div className="grid grid-cols-2 gap-2 bg-black p-1 rounded-full border border-[#23252a]">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRoomMode('real')}
+                    className={`h-8 rounded-full text-[12px] font-medium flex items-center justify-center gap-1 cursor-pointer ${
+                      selectedRoomMode === 'real'
+                        ? 'bg-white text-black'
+                        : 'text-[#7c7d85]'
+                    }`}
+                  >
+                    <span>👥 Solo Amigos Reales</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRoomMode('bots')}
+                    className={`h-8 rounded-full text-[12px] font-medium flex items-center justify-center gap-1 cursor-pointer ${
+                      selectedRoomMode === 'bots'
+                        ? 'bg-white text-black'
+                        : 'text-[#7c7d85]'
+                    }`}
+                  >
+                    <span>🤖 Con Bots</span>
+                  </button>
+                </div>
+
+                {/* Selector 2: En Vivo vs Por Turnos */}
                 <div className="grid grid-cols-2 gap-2 bg-black p-1 rounded-full border border-[#23252a]">
                   <button
                     type="button"
@@ -616,7 +708,8 @@ export const Lobby: React.FC<LobbyProps> = ({
                       onJoinOrCreateRoom(
                         code,
                         selectedPacing,
-                        `Sala #${code}`
+                        `Sala #${code}`,
+                        selectedRoomMode
                       );
                       setJoinInput('');
                     }

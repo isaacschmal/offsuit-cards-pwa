@@ -192,6 +192,26 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
     const cycled = cycleCardBackColor();
     expect(cycled.cardBackColor).toBe('indigo');
   });
+
+  it('strictly separates Real-Player rooms (isBot=false) from Bot Practice rooms (isBot=true)', async () => {
+    const { createNewOpenRoom, DEFAULT_OPEN_ROOMS } = await import('../../../lib/multiplayer');
+
+    const realState = createInitialTableState('PRIMOS', 'real');
+    expect(realState.roomMode).toBe('real');
+    expect(realState.players.slice(1).every((p) => p.isBot === false)).toBe(true);
+
+    const botState = createInitialTableState('BOTS', 'bots');
+    expect(botState.roomMode).toBe('bots');
+    expect(botState.players.slice(1).every((p) => p.isBot === true)).toBe(true);
+
+    expect(DEFAULT_OPEN_ROOMS.find((r) => r.code === 'PRIMOS')?.roomMode).toBe('real');
+    expect(DEFAULT_OPEN_ROOMS.find((r) => r.code === 'TURNOS')?.roomMode).toBe('real');
+    expect(DEFAULT_OPEN_ROOMS.find((r) => r.code === 'BOTS')?.roomMode).toBe('bots');
+
+    const customReal = createNewOpenRoom('Mesa Amigos', 'live', 'AMIGOS', 'real');
+    expect(customReal.roomMode).toBe('real');
+  });
 });
+
 
 

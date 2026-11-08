@@ -1,4 +1,4 @@
-import { Check, Copy, Pencil, Plus, Settings, Users, X } from 'lucide-react';
+import { Check, Copy, Pencil, Plus, Settings, Trophy, Users, X } from 'lucide-react';
 import React, { useState } from 'react';
 import {
   getNotificationPermission,
@@ -10,7 +10,6 @@ import {
   CARD_BACK_THEMES,
   type CardBackColorId,
   computePlaystyleMetrics,
-  cycleCardBackColor,
   DEFAULT_USER_PROFILE,
   type PlaystyleArchetype,
   saveUserProfile,
@@ -28,7 +27,22 @@ interface ProfileViewProps {
   onOpenCreateOrInviteModal: () => void;
 }
 
-const AVATAR_CYCLE = ['hero', 'emma', 'leo', 'akash', 'tori', 'evelyn'];
+const AVATAR_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: 'hero', label: 'Gafas Verdes' },
+  { id: 'emma', label: 'Emma' },
+  { id: 'leo', label: 'Leo' },
+  { id: 'akash', label: 'Akash' },
+  { id: 'tori', label: 'Tori' },
+  { id: 'evelyn', label: 'Evelyn' },
+];
+
+const RANK_TIERS = [
+  { emoji: '🦐', name: 'Shrimp', minLevel: 1, xpRange: '0 – 499 XP' },
+  { emoji: '🦀', name: 'Crab', minLevel: 3, xpRange: '500 – 999 XP' },
+  { emoji: '🐬', name: 'Dolphin', minLevel: 5, xpRange: '1,000 – 1,999 XP' },
+  { emoji: '🦈', name: 'Shark', minLevel: 9, xpRange: '2,000 – 4,999 XP' },
+  { emoji: '🐋', name: 'Whale', minLevel: 21, xpRange: '5,000+ XP' },
+];
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
   profile,
@@ -36,10 +50,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onProfileChange,
   onOpenCreateOrInviteModal,
 }) => {
-  const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(profile.name);
+  const [avatarDraft, setAvatarDraft] = useState(profile.avatarId);
   const [activeSheet, setActiveSheet] = useState<
-    null | 'friends' | 'emotes' | 'cardBacks' | 'settings'
+    null | 'editProfile' | 'friends' | 'emotes' | 'cardBacks' | 'rank' | 'settings'
   >(null);
   const [copiedFriendLink, setCopiedFriendLink] = useState(false);
 
@@ -109,25 +123,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const activeCallout = archetypeConfig[metrics.archetype];
 
-  const handleSaveName = () => {
+  const handleOpenProfileEditor = () => {
+    setNameDraft(profile.name);
+    setAvatarDraft(profile.avatarId);
+    setActiveSheet('editProfile');
+  };
+
+  const handleSaveProfileEdit = (e?: React.FormEvent) => {
+    e?.preventDefault();
     const trimmed = nameDraft.trim() || 'isaac';
-    const next = updateUserProfile((prev) => ({ ...prev, name: trimmed }));
+    const next = updateUserProfile((prev) => ({
+      ...prev,
+      name: trimmed,
+      avatarId: avatarDraft,
+    }));
     onProfileChange(next);
-    setIsEditingName(false);
-  };
-
-  const handleCycleAvatar = () => {
-    const next = updateUserProfile((prev) => {
-      const idx = AVATAR_CYCLE.indexOf(prev.avatarId);
-      const nextAv = AVATAR_CYCLE[(idx + 1) % AVATAR_CYCLE.length];
-      return { ...prev, avatarId: nextAv };
-    });
-    onProfileChange(next);
-  };
-
-  const handleCycleCardBack = () => {
-    const next = cycleCardBackColor();
-    onProfileChange(next);
+    setActiveSheet(null);
   };
 
   const handleSelectCardBack = (colorId: CardBackColorId) => {
@@ -141,6 +152,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   const rankProgressPct = Math.min(100, Math.max(18, Math.round(((profile.xp % 250) / 250) * 100)));
+  const xpToNextLevel = 250 - (profile.xp % 250);
   const cardBackIndex = CARD_BACK_ORDER.indexOf(profile.cardBackColor) + 1;
 
   return (
@@ -156,22 +168,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <Settings className="w-6 h-6 stroke-[1.8]" />
         </button>
 
-        {/* Centered 3D Avatar with small edit badge (✎) */}
+        {/* Centered 3D Avatar with small edit badge (✎) — opens Profile Editor Modal */}
         <div className="relative">
           <button
             type="button"
-            onClick={handleCycleAvatar}
+            onClick={handleOpenProfileEditor}
             className="w-[84px] h-[84px] rounded-full bg-[#16181d] border border-[#25272e] flex items-center justify-center overflow-hidden active:scale-95 transition-transform cursor-pointer"
-            title="Cambiar avatar"
+            title="Editar nombre y avatar"
           >
             <Avatar3D avatarId={profile.avatarId} size={74} />
           </button>
           <button
             type="button"
-            onClick={() => {
-              setNameDraft(profile.name);
-              setIsEditingName(true);
-            }}
+            onClick={handleOpenProfileEditor}
             aria-label="Editar perfil"
             className="absolute -bottom-0.5 -right-0.5 w-7 h-7 rounded-full bg-[#1e2028] border border-[#323540] text-white flex items-center justify-center shadow-md cursor-pointer"
           >
@@ -179,42 +188,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </button>
         </div>
 
-        {/* Editable Player Name */}
-        {isEditingName ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSaveName();
-            }}
-            className="mt-3 flex items-center gap-1.5"
-          >
-            <input
-              type="text"
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              maxLength={18}
-              autoFocus
-              className="h-8 px-3 rounded-full bg-[#16181d] border border-white/30 text-white text-[16px] text-center focus:outline-none"
-            />
-            <button
-              type="submit"
-              className="h-8 px-3 rounded-full bg-white text-black text-[12px] font-semibold cursor-pointer"
-            >
-              OK
-            </button>
-          </form>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setNameDraft(profile.name);
-              setIsEditingName(true);
-            }}
-            className="mt-2.5 text-[22px] font-medium text-white tracking-tight hover:opacity-80 cursor-pointer"
-          >
-            {profile.name}
-          </button>
-        )}
+        {/* Tappable Player Name — opens Profile Editor Modal */}
+        <button
+          type="button"
+          onClick={handleOpenProfileEditor}
+          className="mt-2.5 text-[22px] font-medium text-white tracking-tight hover:opacity-80 cursor-pointer"
+        >
+          {profile.name}
+        </button>
       </div>
 
       {/* 2x2 Action Pills + Full-Width Rank Progress Pill (matching image_2.png) */}
@@ -266,14 +247,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </div>
         </button>
 
-        {/* Middle-right: 2 (20) Card backs pill with mini card-back preview */}
+        {/* Middle-right: 2 (20) Card backs pill with mini card-back preview — opens Card Backs sheet */}
         <button
           type="button"
-          onClick={handleCycleCardBack}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setActiveSheet('cardBacks');
-          }}
+          onClick={() => setActiveSheet('cardBacks')}
           className="h-[68px] rounded-[20px] bg-[#141519] border border-[#22242a] px-3.5 flex items-center gap-3 text-left active:scale-[0.99] transition-transform cursor-pointer"
         >
           <div className="w-8 h-11 shrink-0">
@@ -322,8 +299,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       </div>
 
-      {/* Full-width bottom pill: 🦐 Shrimp · Rank progress */}
-      <div className="mt-3 rounded-[20px] bg-[#141519] border border-[#22242a] px-4 py-3.5 flex items-center gap-3.5">
+      {/* Full-width bottom pill: 🦐 Shrimp · Rank progress (Interactive Button) */}
+      <button
+        type="button"
+        onClick={() => setActiveSheet('rank')}
+        className="mt-3 w-full rounded-[20px] bg-[#141519] border border-[#22242a] px-4 py-3.5 flex items-center gap-3.5 text-left active:scale-[0.99] transition-transform cursor-pointer"
+      >
         <span className="text-[26px] leading-none">🦐</span>
         <div className="flex-1 flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
@@ -344,7 +325,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             Rank progress
           </span>
         </div>
-      </div>
+      </button>
 
       {/* Statistics Section + Playstyle Diamond Radar Chart (matching image_2.png) */}
       <div className="mt-7">
@@ -450,7 +431,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             />
 
             {/* 4 Axis Labels */}
-            {/* Top: Aggressive (#f43f5e) */}
             <text
               x={cx}
               y={26}
@@ -471,7 +451,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               More bets &amp; raises
             </text>
 
-            {/* Bottom: Passive (#38bdf8) */}
             <text
               x={cx}
               y={266}
@@ -492,7 +471,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               More calls
             </text>
 
-            {/* Left: Tight (#a855f7) */}
             <text
               x={44}
               y={146}
@@ -513,7 +491,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               Less hands
             </text>
 
-            {/* Right: Loose (#f59e0b) */}
             <text
               x={316}
               y={146}
@@ -569,7 +546,198 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       </div>
 
-      {/* Modals / Sheets for Friends, Emotes, Settings */}
+      {/* SHEET 1: EDIT PROFILE (Name + Avatar Picker) */}
+      {activeSheet === 'editProfile' && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-end justify-center p-4">
+          <form
+            onSubmit={handleSaveProfileEdit}
+            className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[16px] font-semibold text-white">
+                Editar Perfil y Avatar
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveSheet(null)}
+                className="w-8 h-8 rounded-full bg-[#23252a] flex items-center justify-center text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] text-[#9ca3af] font-medium">
+                Tu nombre de jugador
+              </label>
+              <input
+                type="text"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                maxLength={18}
+                autoFocus
+                placeholder="Tu nombre"
+                className="h-11 px-4 rounded-[16px] bg-black border border-[#2e313b] text-white text-[15px] focus:outline-none focus:border-white"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <span className="text-[12px] text-[#9ca3af] font-medium">
+                Elige tu Avatar 3D
+              </span>
+              <div className="grid grid-cols-3 gap-2.5">
+                {AVATAR_OPTIONS.map((av) => {
+                  const isSelected = avatarDraft === av.id;
+                  return (
+                    <button
+                      key={av.id}
+                      type="button"
+                      onClick={() => setAvatarDraft(av.id)}
+                      className={`p-2.5 rounded-[18px] border flex flex-col items-center gap-1.5 cursor-pointer transition-all ${
+                        isSelected
+                          ? 'bg-white/15 border-white'
+                          : 'bg-black/40 border-[#25272e] hover:border-white/30'
+                      }`}
+                    >
+                      <Avatar3D avatarId={av.id} size={46} />
+                      <span className="text-[11px] font-medium text-white">
+                        {av.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full h-11 rounded-full bg-white text-black text-[14px] font-semibold cursor-pointer active:scale-95 transition-transform"
+            >
+              Guardar cambios
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* SHEET 2: CARD BACKS SELECTOR */}
+      {activeSheet === 'cardBacks' && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-end justify-center p-4">
+          <div className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[16px] font-semibold text-white">
+                Dorsos de Cartas (Card Backs)
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveSheet(null)}
+                className="w-8 h-8 rounded-full bg-[#23252a] flex items-center justify-center text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {CARD_BACK_ORDER.map((cid) => {
+                const theme = CARD_BACK_THEMES[cid];
+                const isSelected = profile.cardBackColor === cid;
+                return (
+                  <button
+                    key={cid}
+                    type="button"
+                    onClick={() => {
+                      handleSelectCardBack(cid);
+                      setActiveSheet(null);
+                    }}
+                    className={`p-3 rounded-[20px] border flex flex-col items-center gap-2.5 cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-white/12 border-white'
+                        : 'bg-black/40 border-[#25272e]'
+                    }`}
+                  >
+                    <div className="w-[72px] h-[102px]">
+                      <OffsuitCardBack colorId={cid} className="w-full h-full" />
+                    </div>
+                    <span className="text-[12px] font-medium text-white">
+                      {theme.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SHEET 3: RANK PROGRESS & LEVELS */}
+      {activeSheet === 'rank' && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-end justify-center p-4">
+          <div className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-[#fb923c]" />
+                <span className="text-[16px] font-semibold text-white">
+                  Progreso de Rango · Nivel {profile.level}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveSheet(null)}
+                className="w-8 h-8 rounded-full bg-[#23252a] flex items-center justify-center text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-black/50 border border-[#23252a] rounded-[18px] p-3.5 flex flex-col gap-2">
+              <div className="flex items-center justify-between text-[13px]">
+                <span className="text-white font-medium">
+                  XP Actual: {profile.xp} XP
+                </span>
+                <span className="text-[#fb923c]">
+                  Faltan {xpToNextLevel} XP para Nivel {profile.level + 1}
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-[#25272f] overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-[#f43f5e] to-[#fb923c]"
+                  style={{ width: `${rankProgressPct}%` }}
+                />
+              </div>
+              <span className="text-[11px] text-[#7c7d85]">
+                Ganas +4 XP por cada decisión y +25 XP al ganar una mano.
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              {RANK_TIERS.map((tier) => {
+                const isCurrent = tier.name === 'Shrimp';
+                return (
+                  <div
+                    key={tier.name}
+                    className={`flex items-center justify-between px-3.5 py-2 rounded-[14px] border ${
+                      isCurrent
+                        ? 'bg-white/10 border-white/40'
+                        : 'bg-black/30 border-[#23252a]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-[20px]">{tier.emoji}</span>
+                      <span className="text-[13px] font-medium text-white">
+                        {tier.name}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-[#7c7d85]">
+                      {tier.xpRange}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SHEET 4: EMOTES */}
       {activeSheet === 'emotes' && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-end justify-center p-4">
           <div className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4">
@@ -608,6 +776,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
+      {/* SHEET 5: FRIENDS */}
       {activeSheet === 'friends' && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-end justify-center p-4">
           <div className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4">
@@ -630,7 +799,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="flex flex-col gap-2">
               {[
                 { id: 'leo', name: 'primo_leo', status: 'En Mesa de los Primos' },
-                { id: 'akash', name: 'akash', status: 'En Torneo Semanal' },
+                { id: 'akash', name: 'akash', status: 'En Mesa en Vivo' },
                 { id: 'emma', name: 'emma_poker', status: 'Conectada' },
                 { id: 'tori', name: 'tori_v', status: 'Turno pendiente' },
               ].map((fr) => (
@@ -688,6 +857,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
+      {/* SHEET 6: SETTINGS */}
       {activeSheet === 'settings' && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-end justify-center p-4">
           <div className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4">

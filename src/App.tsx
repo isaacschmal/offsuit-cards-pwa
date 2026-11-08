@@ -4,6 +4,7 @@ import { PokerTable } from './components/poker/PokerTable';
 import {
   createInitialTableState,
   type PokerTableState,
+  type RoomPlayersMode,
 } from './engine/poker/gameState';
 import {
   getOrInitRoomState,
@@ -22,7 +23,7 @@ export function App() {
   const [pacingMode, setPacingMode] = useState<RoomPacingMode>('live');
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [tableState, setTableState] = useState<PokerTableState>(() =>
-    createInitialTableState('PRIMOS')
+    createInitialTableState('PRIMOS', 'real')
   );
   const [externalState, setExternalState] = useState<PokerTableState | null>(null);
   const syncRef = useRef<RoomSyncHandle | null>(null);
@@ -60,18 +61,25 @@ export function App() {
   const handleJoinOrCreateRoom = (
     newCode: string,
     mode?: RoomPacingMode,
-    customName?: string
+    customName?: string,
+    playersMode?: RoomPlayersMode
   ) => {
     const normalized = newCode.trim().toUpperCase();
     const existingRoom = loadOpenRooms().find((r) => r.code === normalized);
     const resolvedMode: RoomPacingMode = mode ?? existingRoom?.pacingMode ?? 'live';
+    const resolvedPlayersMode: RoomPlayersMode =
+      playersMode ??
+      existingRoom?.roomMode ??
+      (normalized === 'BOTS' ? 'bots' : 'real');
     const resolvedName = customName ?? existingRoom?.name ?? `Sala #${normalized}`;
 
     upsertOpenRoom({
       code: normalized,
       name: resolvedName,
       pacingMode: resolvedMode,
-      playerCount: existingRoom?.playerCount ?? 2,
+      roomMode: resolvedPlayersMode,
+      playerCount:
+        existingRoom?.playerCount ?? (resolvedPlayersMode === 'bots' ? 6 : 2),
       maxPlayers: 6,
       blindsLabel: existingRoom?.blindsLabel ?? '1/2',
       turnTimerSeconds: resolvedMode === 'live' ? 20 : null,
@@ -79,7 +87,7 @@ export function App() {
       updatedAt: Date.now(),
     });
 
-    const roomState = getOrInitRoomState(normalized);
+    const roomState = getOrInitRoomState(normalized, resolvedPlayersMode);
     setRoomCode(normalized);
     setRoomName(resolvedName);
     setPacingMode(resolvedMode);
@@ -94,7 +102,9 @@ export function App() {
         activeRoomCode={roomCode}
         activePacingMode={pacingMode}
         onlineCount={onlineCount}
-        onStartInstantTable={() => setView('table')}
+        onStartInstantTable={() =>
+          handleJoinOrCreateRoom('BOTS', 'live', 'Práctica vs Bots (IA)', 'bots')
+        }
         onJoinOrCreateRoom={handleJoinOrCreateRoom}
       />
     );

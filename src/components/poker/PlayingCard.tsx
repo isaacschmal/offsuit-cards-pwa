@@ -54,7 +54,7 @@ export interface CardBackProps {
 }
 
 /**
- * Clean static geometric card back with white outer border and static 12-spoke central rosette.
+ * Clean static geometric card back with white outer border and concentric diamond emblem.
  * Supports customizable colors ('slate' #9aa3aa, 'indigo' #6366f1, 'emerald' #10b981, 'crimson' #e11d48).
  */
 export const OffsuitCardBack: React.FC<CardBackProps> = ({
@@ -77,7 +77,6 @@ export const OffsuitCardBack: React.FC<CardBackProps> = ({
 
   const activeColorId = colorId ?? prefColor;
   const theme = CARD_BACK_THEMES[activeColorId] ?? CARD_BACK_THEMES.slate;
-  const spokes = Array.from({ length: 12 }, (_, i) => i * 30);
 
   return (
     <div
@@ -93,49 +92,56 @@ export const OffsuitCardBack: React.FC<CardBackProps> = ({
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
         >
-          {/* Thin geometric line & circle background pattern */}
+          {/* Thin geometric line & interlocking ring pattern */}
           <g stroke="rgba(255,255,255,0.42)" strokeWidth="1">
-            <line x1="50" y1="0" x2="50" y2="142" />
-            <line x1="0" y1="71" x2="100" y2="71" />
-            <circle cx="50" cy="71" r="46" />
-            <circle cx="50" cy="71" r="29" />
-            <circle cx="50" cy="18" r="19" />
-            <circle cx="50" cy="18" r="7" />
-            <circle cx="50" cy="124" r="19" />
-            <circle cx="50" cy="124" r="7" />
-            <circle cx="3" cy="71" r="16" />
-            <circle cx="3" cy="71" r="6" />
-            <circle cx="97" cy="71" r="16" />
-            <circle cx="97" cy="71" r="6" />
-            <path d="M5 10 Q50 55 95 10" />
-            <path d="M5 132 Q50 87 95 132" />
+            <rect x="6" y="6" width="88" height="130" rx="10" stroke="rgba(255,255,255,0.32)" />
+            <line x1="50" y1="6" x2="50" y2="136" />
+            <line x1="6" y1="71" x2="94" y2="71" />
+            <circle cx="50" cy="71" r="44" />
+            <circle cx="50" cy="71" r="30" />
+            <circle cx="50" cy="20" r="14" />
+            <polygon points="50,12 56,20 50,28 44,20" stroke="rgba(255,255,255,0.55)" />
+            <circle cx="50" cy="122" r="14" />
+            <polygon points="50,114 56,122 50,130 44,122" stroke="rgba(255,255,255,0.55)" />
+            <path d="M10 14 Q50 52 90 14" />
+            <path d="M10 128 Q50 90 90 128" />
           </g>
 
-          {/* Central solid medallion with white border */}
+          {/* Central solid medallion with crisp double border */}
           <circle
             cx="50"
             cy="71"
-            r="25"
+            r="24"
             fill={theme.hex}
-            stroke="rgba(255,255,255,0.55)"
-            strokeWidth="1.2"
+            stroke="rgba(255,255,255,0.68)"
+            strokeWidth="1.3"
+          />
+          <circle
+            cx="50"
+            cy="71"
+            r="19.5"
+            fill="none"
+            stroke="rgba(255,255,255,0.35)"
+            strokeWidth="0.9"
           />
 
-          {/* Static 12-spoke printed white geometric rosette (no spinning animation) */}
-          <g transform="translate(50, 71)">
-            {spokes.map((angle) => (
-              <rect
-                key={angle}
-                x="-1.6"
-                y="-15.5"
-                width="3.2"
-                height="7.5"
-                rx="1.6"
-                fill="#ffffff"
-                transform={`rotate(${angle})`}
-              />
-            ))}
-          </g>
+          {/* Clean geometric diamond/compass centerpiece (replaces 12-spoke wheel) */}
+          <polygon
+            points="50,53 64,71 50,89 36,71"
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth="1.7"
+            strokeLinejoin="round"
+          />
+          <polygon
+            points="50,59.5 58.5,71 50,82.5 41.5,71"
+            fill="#ffffff"
+            fillOpacity="0.92"
+          />
+          <polygon
+            points="50,65.5 54,71 50,76.5 46,71"
+            fill={theme.hex}
+          />
         </svg>
       </div>
     </div>
@@ -147,18 +153,19 @@ export const CardBack = OffsuitCardBack;
 interface CommunityCardSlotProps {
   card?: Card;
   index: number;
+  handNumber?: number;
   cardBackColor?: CardBackColorId;
 }
 
 /**
  * 3D Perspective Community Card Slot.
- * Keeps both the Back Face (OffsuitCardBack) and Front Face (revealed rank & suit)
- * mounted with `backfaceVisibility: 'hidden'` and animates `rotateY` from 0deg to 180deg
- * with a staggered flop delay (`index * 0.14s`).
+ * Animates dealing in from the top deck whenever `handNumber` changes,
+ * and animates `rotateY` from 0deg to 180deg when revealed on Flop/Turn/River.
  */
 export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({
   card,
   index,
+  handNumber = 1,
   cardBackColor,
 }) => {
   const overlapClass = index > 0 ? '-ml-[3px]' : '';
@@ -179,7 +186,15 @@ export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({
   const flipDelay = isRevealed ? (index < 3 ? index * 0.14 : 0.04) : 0;
 
   return (
-    <div
+    <motion.div
+      key={`community-deal-${handNumber}-${index}`}
+      initial={{ opacity: 0, y: -45, scale: 0.78 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{
+        duration: 0.38,
+        delay: index * 0.07,
+        ease: [0.22, 1, 0.36, 1],
+      }}
       className={`w-full aspect-[0.71] relative select-none ${overlapClass}`}
       style={{ perspective: '1000px' }}
     >
@@ -234,12 +249,13 @@ export const CommunityCardSlot: React.FC<CommunityCardSlotProps> = ({
           )}
         </div>
       </motion.div>
-    </div>
+    </motion.div>
   );
 };
 
 interface HoleCardsBlockProps {
   cards: Card[];
+  handNumber?: number;
   folded?: boolean;
   canDragToFold?: boolean;
   onFoldTrigger?: () => void;
@@ -247,13 +263,12 @@ interface HoleCardsBlockProps {
 
 /**
  * Bottom-left 2 overlapping hole cards block matching IMG_8408 - IMG_8413.
- * Supports Offsuit's signature Throw-to-Fold upward flick/drag gesture:
- * dragging/flicking past `offset.y < -65` or `velocity.y < -350` animates the cards
- * flying into the center table (`opacity: 0, y: -220, scale: 0.45, rotate: -15`)
- * and triggers the `fold` action.
+ * Animates each hole card flying in from the center deck on each new hand (`handNumber`),
+ * and supports Offsuit's signature Throw-to-Fold upward flick/drag gesture.
  */
 export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
   cards,
+  handNumber = 1,
   folded = false,
   canDragToFold = false,
   onFoldTrigger,
@@ -265,7 +280,7 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
     if (!folded) {
       setIsThrown(false);
     }
-  }, [folded, cards[0]?.id, cards[1]?.id]);
+  }, [folded, handNumber, cards[0]?.id, cards[1]?.id]);
 
   const first = cards[0];
   const second = cards[1];
@@ -323,8 +338,18 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
         dragEnabled ? 'cursor-grab active:cursor-grabbing' : ''
       }`}
     >
-      {/* Left Hole Card */}
-      <div className="w-[58%] h-full bg-white rounded-[24px] px-4 py-3.5 flex flex-col justify-between items-start">
+      {/* Left Hole Card flying in from center deck */}
+      <motion.div
+        key={`hole-card-0-${handNumber}-${first.id}`}
+        initial={{ opacity: 0, x: 40, y: -160, rotate: 12, scale: 0.6 }}
+        animate={{ opacity: 1, x: 0, y: 0, rotate: 0, scale: 1 }}
+        transition={{
+          duration: 0.42,
+          delay: 0.12,
+          ease: [0.22, 1, 0.36, 1],
+        }}
+        className="w-[58%] h-full bg-white rounded-[24px] px-4 py-3.5 flex flex-col justify-between items-start"
+      >
         <span
           className={`text-[40px] font-normal leading-none tracking-tight ${
             firstRed ? 'text-[#ef4444]' : 'text-[#18181b]'
@@ -335,10 +360,20 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
         <div className="pl-0.5 pb-0.5">
           <SuitGraphic suit={first.suit} size={26} />
         </div>
-      </div>
+      </motion.div>
 
-      {/* Right Hole Card overlapping left card with soft drop shadow */}
-      <div className="w-[58%] h-full bg-white rounded-[24px] px-4 py-3.5 flex flex-col justify-between items-start -ml-[16%] shadow-[-10px_0_24px_rgba(0,0,0,0.22)]">
+      {/* Right Hole Card overlapping left card with soft drop shadow & staggered deal */}
+      <motion.div
+        key={`hole-card-1-${handNumber}-${second.id}`}
+        initial={{ opacity: 0, x: 40, y: -160, rotate: 12, scale: 0.6 }}
+        animate={{ opacity: 1, x: 0, y: 0, rotate: 0, scale: 1 }}
+        transition={{
+          duration: 0.42,
+          delay: 0.24,
+          ease: [0.22, 1, 0.36, 1],
+        }}
+        className="w-[58%] h-full bg-white rounded-[24px] px-4 py-3.5 flex flex-col justify-between items-start -ml-[16%] shadow-[-10px_0_24px_rgba(0,0,0,0.22)]"
+      >
         <span
           className={`text-[40px] font-normal leading-none tracking-tight ${
             secondRed ? 'text-[#ef4444]' : 'text-[#18181b]'
@@ -349,7 +384,7 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
         <div className="pl-0.5 pb-0.5">
           <SuitGraphic suit={second.suit} size={26} />
         </div>
-      </div>
+      </motion.div>
     </motion.div>
   );
 };

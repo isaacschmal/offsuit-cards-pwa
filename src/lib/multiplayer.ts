@@ -2,15 +2,18 @@ import {
   createInitialTableState,
   getTotalPot,
   type PokerTableState,
+  type RoomPlayersMode,
 } from '../engine/poker/gameState';
 import { supabase } from './supabase';
 
 export type RoomPacingMode = 'live' | 'async';
+export type { RoomPlayersMode };
 
 export interface OpenRoomInfo {
   code: string;
   name: string;
   pacingMode: RoomPacingMode;
+  roomMode: RoomPlayersMode;
   playerCount: number;
   maxPlayers: number;
   blindsLabel: string;
@@ -19,8 +22,8 @@ export interface OpenRoomInfo {
   updatedAt: number;
 }
 
-const ROOMS_STORAGE_KEY = 'cartas_open_rooms_directory_v2';
-const ROOM_STATE_PREFIX = 'cartas_room_state_v2_';
+const ROOMS_STORAGE_KEY = 'cartas_open_rooms_directory_v3';
+const ROOM_STATE_PREFIX = 'cartas_room_state_v3_';
 
 const partykitHost = import.meta.env.VITE_PARTYKIT_HOST as string | undefined;
 export const isPartyKitConfigured = Boolean(partykitHost && partykitHost.trim().length > 0);
@@ -41,6 +44,7 @@ export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [
     code: 'PRIMOS',
     name: 'Mesa de los Primos',
     pacingMode: 'live',
+    roomMode: 'real',
     playerCount: 5,
     maxPlayers: 6,
     blindsLabel: '1/2',
@@ -49,26 +53,28 @@ export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [
     updatedAt: Date.now() - 45_000,
   },
   {
-    code: 'TORNEO',
-    name: 'Torneo Semanal',
-    pacingMode: 'live',
-    playerCount: 5,
-    maxPlayers: 6,
-    blindsLabel: '2/4',
-    turnTimerSeconds: 20,
-    currentTurnPlayerName: 'En vivo',
-    updatedAt: Date.now() - 95_000,
-  },
-  {
     code: 'TURNOS',
     name: 'Ajedrez de Cartas (Por Turnos)',
     pacingMode: 'async',
+    roomMode: 'real',
     playerCount: 4,
     maxPlayers: 6,
     blindsLabel: '1/2',
     turnTimerSeconds: null,
     currentTurnPlayerName: 'primo_leo',
-    updatedAt: Date.now() - 320_000,
+    updatedAt: Date.now() - 120_000,
+  },
+  {
+    code: 'BOTS',
+    name: 'Práctica vs Bots (IA)',
+    pacingMode: 'live',
+    roomMode: 'bots',
+    playerCount: 6,
+    maxPlayers: 6,
+    blindsLabel: '1/2',
+    turnTimerSeconds: 20,
+    currentTurnPlayerName: '5 Bots IA',
+    updatedAt: Date.now() - 220_000,
   },
 ];
 
@@ -86,7 +92,10 @@ export function loadOpenRooms(): OpenRoomInfo[] {
     if (!Array.isArray(parsed) || parsed.length === 0) {
       return DEFAULT_OPEN_ROOMS;
     }
-    return parsed;
+    return parsed.map((r) => ({
+      ...r,
+      roomMode: r.roomMode ?? (r.code === 'BOTS' ? 'bots' : 'real'),
+    }));
   } catch {
     return DEFAULT_OPEN_ROOMS;
   }
@@ -122,7 +131,8 @@ export function upsertOpenRoom(room: OpenRoomInfo): OpenRoomInfo[] {
 export function createNewOpenRoom(
   name: string,
   pacingMode: RoomPacingMode,
-  customCode?: string
+  customCode?: string,
+  roomMode: RoomPlayersMode = 'real'
 ): OpenRoomInfo {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let generated = '';
@@ -135,7 +145,8 @@ export function createNewOpenRoom(
     code,
     name: name.trim() || `Sala #${code}`,
     pacingMode,
-    playerCount: 1,
+    roomMode,
+    playerCount: roomMode === 'bots' ? 6 : 1,
     maxPlayers: 6,
     blindsLabel: '1/2',
     turnTimerSeconds: pacingMode === 'live' ? 20 : null,
@@ -187,13 +198,25 @@ export function savePersistedRoomState(roomCode: string, state: PokerTableState)
   }
 }
 
-export function getOrInitRoomState(roomCode: string): PokerTableState {
+export function getOrInitRoomState(
+  roomCode: string,
+  roomMode: RoomPlayersMode = 'real'
+): PokerTableState {
   const normalized = roomCode.trim().toUpperCase();
   const saved = loadPersistedRoomState(normalized);
   if (saved && Array.isArray(saved.players) && saved.players.length === 6) {
-    return saved;
+    // Ensure saved state's player bot flags match the roomMode
+    const shouldBeBot = roomMode === 'bots';
+    const syncedPlayers = saved.players.map((p, idx) =>
+      idx === 0 ? p : { ...p, isBot: shouldBeBot }
+    );
+    return {
+      ...saved,
+      roomMode,
+      players: syncedPlayers,
+    };
   }
-  const fresh = createInitialTableState(normalized);
+  const fresh = createInitialTableState(normalized, roomMode);
   savePersistedRoomState(normalized, fresh);
   return fresh;
 }
