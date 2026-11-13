@@ -5,6 +5,7 @@ import {
   type PokerTableState,
   type RoomPlayersMode,
   seatPlayerInTable,
+  vacatePlayerSeat,
 } from '../engine/poker/gameState';
 import { loadUserProfile, returnTableStack } from './profile';
 import { supabase } from './supabase';
@@ -173,14 +174,21 @@ export function parseMqttPublishPackets(
   return results;
 }
 
+import { isVacantSeat } from '../engine/poker/gameState';
+
 export interface MqttSubscriptionHandle {
   publish: (topic: string, data: unknown, retain?: boolean) => void;
   close: () => void;
 }
 
+export interface ConnectMqttOptions {
+  onConnected?: () => void;
+}
+
 export function connectMqttTopics(
   topics: string[],
-  onMessage: (topic: string, data: unknown) => void
+  onMessage: (topic: string, data: unknown) => void,
+  options?: ConnectMqttOptions
 ): MqttSubscriptionHandle {
   if (typeof WebSocket === 'undefined') {
     return { publish: () => {}, close: () => {} };
@@ -188,31 +196,45 @@ export function connectMqttTopics(
 
   let closed = false;
   const activeClients: Array<{
-    ws: WebSocket;
+    brokerUrl: string;
+    brokerIdx: number;
+    ws: WebSocket | null;
     isReady: boolean;
     pingTimer: ReturnType<typeof setInterval> | null;
+    reconnectTimer: ReturnType<typeof setTimeout> | null;
+    reconnectAttempt: number;
     pendingPublishes: Array<{ topic: string; json: string; retain: boolean }>;
   }> = [];
 
-  // Connect to ALL configured MQTT WebSocket brokers in parallel for dual-broker redundancy
-  MQTT_BROKER_URLS.forEach((brokerUrl, brokerIdx) => {
+  const connectBroker = (
+    clientEntry: (typeof activeClients)[number]
+  ): void => {
+    if (closed) return;
     try {
-      const socket = new WebSocket(brokerUrl, 'mqtt');
+      const socket = new WebSocket(clientEntry.brokerUrl, 'mqtt');
       socket.binaryType = 'arraybuffer';
-      const clientId = `cartas_${brokerIdx}_${Math.random().toString(36).slice(2, 10)}`;
-      const clientEntry = {
-        ws: socket,
-        isReady: false,
-        pingTimer: null as ReturnType<typeof setInterval> | null,
-        pendingPublishes: [] as Array<{ topic: string; json: string; retain: boolean }>,
+      clientEntry.ws = socket;
+      clientEntry.isReady = false;
+      const clientId = `cartas_${clientEntry.brokerIdx}_${Math.random().toString(36).slice(2, 10)}`;
+
+      const flushPending = () => {
+        if (!clientEntry.isReady || socket.readyState !== WebSocket.OPEN) return;
+        while (clientEntry.pendingPublishes.length > 0) {
+          const item = clientEntry.pendingPublishes.shift()!;
+          try {
+            socket.send(buildMqttPublishPacket(item.topic, item.json, item.retain));
+          } catch {
+            // ignore
+          }
+        }
       };
-      activeClients.push(clientEntry);
 
       socket.onopen = () => {
         if (closed) {
           socket.close();
           return;
         }
+        clientEntry.reconnectAttempt = 0;
         try {
           socket.send(buildMqttConnectPacket(clientId));
         } catch {
@@ -236,14 +258,13 @@ export function connectMqttTopics(
               // ignore
             }
           });
-          while (clientEntry.pendingPublishes.length > 0) {
-            const item = clientEntry.pendingPublishes.shift()!;
-            try {
-              socket.send(buildMqttPublishPacket(item.topic, item.json, item.retain));
-            } catch {
-              // ignore
-            }
-          }
+          // Slight delay after SUBSCRIBE so broker processes subscription before we flush join/sync requests
+          setTimeout(() => {
+            flushPending();
+            options?.onConnected?.();
+          }, 80);
+
+          if (clientEntry.pingTimer) clearInterval(clientEntry.pingTimer);
           clientEntry.pingTimer = setInterval(() => {
             if (socket.readyState === WebSocket.OPEN) {
               try {
@@ -256,8 +277,15 @@ export function connectMqttTopics(
           return;
         }
 
+        // SUBACK = 9 -> flush any pending publishes immediately
+        if (packetType === 9) {
+          flushPending();
+          return;
+        }
+
         const published = parseMqttPublishPackets(bytes);
         for (const msg of published) {
+          if (!msg.payload) continue;
           try {
             const parsed = JSON.parse(msg.payload);
             onMessage(msg.topic, parsed);
@@ -274,33 +302,99 @@ export function connectMqttTopics(
           // ignore
         }
       };
+
+      socket.onclose = () => {
+        clientEntry.isReady = false;
+        if (clientEntry.pingTimer) {
+          clearInterval(clientEntry.pingTimer);
+          clientEntry.pingTimer = null;
+        }
+        if (closed) return;
+        const delay = Math.min(8000, 1000 * Math.pow(1.6, clientEntry.reconnectAttempt));
+        clientEntry.reconnectAttempt += 1;
+        if (clientEntry.reconnectTimer) clearTimeout(clientEntry.reconnectTimer);
+        clientEntry.reconnectTimer = setTimeout(() => {
+          connectBroker(clientEntry);
+        }, delay);
+      };
     } catch {
       // ignore broker init error
     }
+  };
+
+  // Connect to ALL configured MQTT WebSocket brokers in parallel for dual-broker redundancy
+  MQTT_BROKER_URLS.forEach((brokerUrl, brokerIdx) => {
+    const clientEntry = {
+      brokerUrl,
+      brokerIdx,
+      ws: null as WebSocket | null,
+      isReady: false,
+      pingTimer: null as ReturnType<typeof setInterval> | null,
+      reconnectTimer: null as ReturnType<typeof setTimeout> | null,
+      reconnectAttempt: 0,
+      pendingPublishes: [] as Array<{ topic: string; json: string; retain: boolean }>,
+    };
+    activeClients.push(clientEntry);
+    connectBroker(clientEntry);
   });
+
+  // Immediately recover dropped WebSockets when returning from background (iOS PWA / Safari) or regaining network
+  const handleWakeReconnect = () => {
+    if (closed) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    for (const client of activeClients) {
+      const state = client.ws?.readyState;
+      if (state === undefined || state === WebSocket.CLOSED || state === WebSocket.CLOSING) {
+        if (client.reconnectTimer) {
+          clearTimeout(client.reconnectTimer);
+          client.reconnectTimer = null;
+        }
+        client.reconnectAttempt = 0;
+        connectBroker(client);
+      } else if (client.isReady) {
+        options?.onConnected?.();
+      }
+    }
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('visibilitychange', handleWakeReconnect);
+    window.addEventListener('online', handleWakeReconnect);
+    window.addEventListener('focus', handleWakeReconnect);
+  }
 
   return {
     publish: (topic: string, data: unknown, retain = false) => {
       if (closed) return;
       const json = data === null ? '' : JSON.stringify(data);
       for (const client of activeClients) {
-        if (client.ws.readyState === WebSocket.OPEN && client.isReady) {
+        if (client.ws && client.ws.readyState === WebSocket.OPEN && client.isReady) {
           try {
             client.ws.send(buildMqttPublishPacket(topic, json, retain));
           } catch {
             // ignore send errors
           }
-        } else if (client.ws.readyState === WebSocket.CONNECTING) {
+        } else {
+          // Queue even if OPEN before CONNACK, CONNECTING, or temporarily reconnecting
+          if (client.pendingPublishes.length > 20) {
+            client.pendingPublishes.shift();
+          }
           client.pendingPublishes.push({ topic, json, retain });
         }
       }
     },
     close: () => {
       closed = true;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('visibilitychange', handleWakeReconnect);
+        window.removeEventListener('online', handleWakeReconnect);
+        window.removeEventListener('focus', handleWakeReconnect);
+      }
       for (const client of activeClients) {
         if (client.pingTimer) clearInterval(client.pingTimer);
+        if (client.reconnectTimer) clearTimeout(client.reconnectTimer);
         try {
-          client.ws.close();
+          client.ws?.close();
         } catch {
           // ignore
         }
@@ -337,17 +431,60 @@ export function shouldAcceptIncomingState(
 
   // Always accept a state that has more real seated players than our local state
   if (incomingSeated > currentSeated) return true;
-  // Never overwrite a multi-player table with a stale 1-player pre-deal state
-  if (currentSeated >= 2 && incomingSeated < 2) return false;
+
+  const incVer = incoming.stateVersion ?? 0;
+  const curVer = current.stateVersion ?? 0;
+
+  // Reject stale 1-player pre-deal states when we already have 2+ seated players,
+  // EXCEPT if a seated player intentionally vacated/cashed out with a strictly newer version
+  if (currentSeated >= 2 && incomingSeated < 2) {
+    const departedActorWasSeated = Boolean(
+      incoming.updatedBy &&
+        current.players.some((p) => p.id === incoming.updatedBy && !isVacantSeat(p))
+    );
+    if (
+      departedActorWasSeated &&
+      incoming.handNumber >= current.handNumber &&
+      incVer > curVer
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // Room discovery adoption: both sides have 1 solo player (two separate tabs/devices in same room code before handshake).
+  // Adopt whichever room was created earlier (or deterministic player ID tie-breaker) so joiner seats next to host!
+  if (
+    currentSeated === 1 &&
+    incomingSeated === 1 &&
+    localPlayerId &&
+    current.players.some((p) => p.id === localPlayerId) &&
+    !incoming.players.some((p) => p.id === localPlayerId)
+  ) {
+    const curCreated = current.createdAt ?? Number.MAX_SAFE_INTEGER;
+    const incCreated = incoming.createdAt ?? Number.MAX_SAFE_INTEGER;
+    if (incCreated !== curCreated) {
+      return incCreated < curCreated;
+    }
+    const curHostId = current.players.find((p) => !isVacantSeat(p))?.id ?? '';
+    const incHostId = incoming.players.find((p) => !isVacantSeat(p))?.id ?? '';
+    return incHostId < curHostId;
+  }
 
   // Higher handNumber always wins
   if (incoming.handNumber > current.handNumber) return true;
   if (incoming.handNumber < current.handNumber) return false;
 
-  const incVer = incoming.stateVersion ?? 0;
-  const curVer = current.stateVersion ?? 0;
-  // Strictly require incoming version to be strictly greater than current version
-  return incVer > curVer;
+  // Strictly higher version wins
+  if (incVer > curVer) return true;
+  if (incVer < curVer) return false;
+
+  // Simultaneous action/deal tie-breaker so peers never stay split-brained on equal version
+  if (incoming.updatedBy && current.updatedBy && incoming.updatedBy !== current.updatedBy) {
+    return incoming.updatedBy < current.updatedBy;
+  }
+
+  return false;
 }
 
 export const DEFAULT_OPEN_ROOMS: OpenRoomInfo[] = [];
@@ -508,7 +645,7 @@ export function upsertOpenRoom(room: OpenRoomInfo): OpenRoomInfo[] {
   }
 
   saveOpenRooms(updated);
-  broadcastDirectoryUpdate(updated);
+  broadcastDirectoryUpdate(updated, undefined, updated.find((r) => r.code === normalizedCode));
   return updated;
 }
 
@@ -546,14 +683,16 @@ export function deleteOpenRoom(roomCode: string, refundPlayerId?: string): OpenR
   }
 
   const stateTopic = `cartas/v5/room/${normalized}/state`;
+  const roomMetaTopic = `${LOBBY_ROOM_TOPIC_PREFIX}${normalized}`;
   sharedLobbyMqtt?.publish(stateTopic, null, true);
+  sharedLobbyMqtt?.publish(roomMetaTopic, null, true);
   broadcastDirectoryUpdate(updated, normalized);
   return updated;
 }
 
 /**
  * Cashes out player's stack from a persisted room state into their wallet,
- * vacates their seat, and updates/broadcasts the room state.
+ * vacates their seat cleanly, and updates/broadcasts the room state.
  */
 export function cashOutAndLeavePersistedRoom(
   roomCode: string,
@@ -584,17 +723,10 @@ export function cashOutAndLeavePersistedRoom(
     return { cashedOut, updatedState: null };
   }
 
-  const updatedPlayers = saved.players.map((p, idx) =>
-    idx === heroIndex ? { ...p, stack: 0, status: 'out' as const } : p
-  );
-
-  const nextState: PokerTableState = {
-    ...saved,
-    players: updatedPlayers,
-    stateVersion: (saved.stateVersion ?? 1) + 1,
-  };
-
+  const nextState = vacatePlayerSeat(saved, hero.id);
   savePersistedRoomState(normalized, nextState);
+  const stateTopic = `cartas/v5/room/${normalized}/state`;
+  sharedLobbyMqtt?.publish(stateTopic, { type: 'table_state', state: nextState }, true);
   return { cashedOut, updatedState: nextState };
 }
 
@@ -626,7 +758,7 @@ export function createNewOpenRoom(
     playerCount: roomMode === 'bots' ? 6 : 1,
     maxPlayers: 6,
     blindsLabel: `${sb}/${bb}`,
-    turnTimerSeconds: pacingMode === 'live' ? 20 : null,
+    turnTimerSeconds: pacingMode === 'live' ? 25 : null,
     currentTurnPlayerName: profile.name || 'Jugador',
     updatedAt: Date.now(),
   };
@@ -680,7 +812,7 @@ export function savePersistedRoomState(roomCode: string, state: PokerTableState)
     const key = `${ROOM_STATE_PREFIX}${normalized}`;
     window.localStorage.setItem(key, JSON.stringify(state));
 
-    // Also update the room's currentTurnPlayerName, buyIn, and real playerCount in the directory
+    // Also update the room's currentTurnPlayerName, buyIn, pacingMode, and real playerCount in the directory
     const rooms = loadOpenRooms();
     const found = rooms.find((r) => r.code === normalized);
     if (found) {
@@ -694,6 +826,8 @@ export function savePersistedRoomState(roomCode: string, state: PokerTableState)
           : currentActor?.name ?? 'En juego';
       upsertOpenRoom({
         ...found,
+        name: state.roomName ?? found.name,
+        pacingMode: state.pacingMode ?? found.pacingMode,
         buyIn: state.tableBuyIn ?? found.buyIn ?? 200,
         playerCount: state.roomMode === 'bots' ? 6 : Math.max(1, seatedCount),
         currentTurnPlayerName: turnLabel,
@@ -719,7 +853,9 @@ export function deletePersistedRoomState(roomCode: string): void {
 export function getOrInitRoomState(
   roomCode: string,
   roomMode: RoomPlayersMode = 'real',
-  buyIn?: number
+  buyIn?: number,
+  pacingMode: RoomPacingMode = 'live',
+  roomName?: string
 ): PokerTableState {
   const normalized = roomCode.trim().toUpperCase();
   const profile = loadUserProfile();
@@ -727,7 +863,14 @@ export function getOrInitRoomState(
 
   // Bot practice sessions are always clean, fresh tables with the paid buy-in
   if (roomMode === 'bots' || normalized === 'BOTS') {
-    const fresh = createInitialTableState(normalized, 'bots', false, targetBuyIn);
+    const fresh = createInitialTableState(
+      normalized,
+      'bots',
+      false,
+      targetBuyIn,
+      'live',
+      roomName
+    );
     const { state: seatedFresh } = seatPlayerInTable(fresh, {
       id: profile.playerId,
       name: profile.name || 'Jugador',
@@ -755,7 +898,14 @@ export function getOrInitRoomState(
     return withLocalPlayer;
   }
 
-  const fresh = createInitialTableState(normalized, roomMode, false, targetBuyIn);
+  const fresh = createInitialTableState(
+    normalized,
+    roomMode,
+    false,
+    targetBuyIn,
+    pacingMode,
+    roomName
+  );
   const { state: seatedFresh } = seatPlayerInTable(fresh, {
     id: profile.playerId,
     name: profile.name || 'Jugador',
@@ -767,9 +917,14 @@ export function getOrInitRoomState(
 }
 
 const LOBBY_MQTT_TOPIC = 'cartas/v5/lobby/directory';
+const LOBBY_ROOM_TOPIC_PREFIX = 'cartas/v5/lobby/rooms/';
 let sharedLobbyMqtt: MqttSubscriptionHandle | null = null;
 
-function broadcastDirectoryUpdate(rooms: OpenRoomInfo[], deletedCode?: string): void {
+function broadcastDirectoryUpdate(
+  rooms: OpenRoomInfo[],
+  deletedCode?: string,
+  upsertedRoom?: OpenRoomInfo
+): void {
   if (typeof BroadcastChannel !== 'undefined') {
     try {
       const bc = new BroadcastChannel('cartas-rooms-directory');
@@ -780,10 +935,18 @@ function broadcastDirectoryUpdate(rooms: OpenRoomInfo[], deletedCode?: string): 
     }
   }
 
+  if (upsertedRoom) {
+    sharedLobbyMqtt?.publish(
+      `${LOBBY_ROOM_TOPIC_PREFIX}${upsertedRoom.code.toUpperCase()}`,
+      { type: 'room_upsert', room: upsertedRoom },
+      true
+    );
+  }
+
   sharedLobbyMqtt?.publish(
     LOBBY_MQTT_TOPIC,
     { type: 'directory_sync', rooms, deletedCode },
-    true
+    false
   );
 
   // PartyKit Cloudflare zero-cost WebSocket directory broadcast
@@ -842,17 +1005,34 @@ export function subscribeToOpenRoomsDirectory(
     };
   }
 
-  const mqttHandle = connectMqttTopics([LOBBY_MQTT_TOPIC], (_topic, data) => {
-    const payload = data as {
-      type?: string;
-      rooms?: OpenRoomInfo[];
-      deletedCode?: string;
-    };
-    if (payload?.type === 'directory_sync' && Array.isArray(payload.rooms)) {
-      applyRemoteSync(payload.rooms, payload.deletedCode);
+  const mqttHandle = connectMqttTopics(
+    [LOBBY_MQTT_TOPIC, `${LOBBY_ROOM_TOPIC_PREFIX}#`],
+    (_topic, data) => {
+      const payload = data as {
+        type?: string;
+        rooms?: OpenRoomInfo[];
+        room?: OpenRoomInfo;
+        deletedCode?: string;
+      };
+      if (payload?.type === 'room_upsert' && payload.room) {
+        applyRemoteSync([payload.room]);
+      } else if (payload?.type === 'directory_sync' && Array.isArray(payload.rooms)) {
+        applyRemoteSync(payload.rooms, payload.deletedCode);
+      }
     }
-  });
+  );
   sharedLobbyMqtt = mqttHandle;
+
+  // Publish any locally known active rooms to individual retained topics on lobby startup
+  for (const r of loadOpenRooms()) {
+    if (r.roomMode !== 'bots' && r.code !== 'BOTS') {
+      mqttHandle.publish(
+        `${LOBBY_ROOM_TOPIC_PREFIX}${r.code.toUpperCase()}`,
+        { type: 'room_upsert', room: r },
+        true
+      );
+    }
+  }
 
   let lobbyWs: WebSocket | null = null;
   const wsUrl = getPartyKitWebSocketUrl('lobby');
@@ -898,6 +1078,83 @@ export function subscribeToOpenRoomsDirectory(
     if (typeof window !== 'undefined') {
       window.removeEventListener('storage', handleStorage);
     }
+  };
+}
+
+/**
+ * Background listener while in the Lobby so "Tus Mesas Activas" updates in real time
+ * and triggers async turn notifications whenever a friend acts on any seated table.
+ */
+export function subscribeToSeatedRooms(
+  roomCodes: string[],
+  localPlayerId: string,
+  onRoomStateUpdated: (roomCode: string, state: PokerTableState) => void
+): () => void {
+  const uniqueCodes = Array.from(
+    new Set(
+      roomCodes
+        .map((c) => c.trim().toUpperCase())
+        .filter((c) => c && c !== 'BOTS')
+    )
+  );
+  if (uniqueCodes.length === 0) return () => {};
+
+  const topics = uniqueCodes.map((c) => `cartas/v5/room/${c}/state`);
+  const bcs: BroadcastChannel[] = [];
+
+  const handleIncoming = (incoming: PokerTableState) => {
+    if (!incoming?.roomId || incoming.roomMode === 'bots') return;
+    const code = incoming.roomId.toUpperCase();
+    const current = loadPersistedRoomState(code);
+    if (!shouldAcceptIncomingState(current, incoming, localPlayerId)) return;
+
+    const prevTurnPlayerId = current?.players[current.currentTurnIndex]?.id;
+    const nextTurnPlayerId = incoming.players[incoming.currentTurnIndex]?.id;
+
+    savePersistedRoomState(code, incoming);
+    onRoomStateUpdated(code, incoming);
+
+    if (
+      prevTurnPlayerId !== localPlayerId &&
+      nextTurnPlayerId === localPlayerId &&
+      incoming.street !== 'showdown' &&
+      getSeatedPlayersCount(incoming.players) >= 2
+    ) {
+      const roomMeta = loadOpenRooms().find((r) => r.code === code);
+      void notifyPlayerTurn(
+        incoming.roomName ?? roomMeta?.name ?? `Sala #${code}`,
+        code,
+        incoming
+      );
+    }
+  };
+
+  if (typeof BroadcastChannel !== 'undefined') {
+    for (const code of uniqueCodes) {
+      try {
+        const bc = new BroadcastChannel(`cartas-room-${code}`);
+        bc.onmessage = (ev) => {
+          if (ev.data?.type === 'table_state' && ev.data?.state) {
+            handleIncoming(ev.data.state as PokerTableState);
+          }
+        };
+        bcs.push(bc);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const mqtt = connectMqttTopics(topics, (_topic, data) => {
+    const payload = data as { type?: string; state?: PokerTableState };
+    if (payload?.type === 'table_state' && payload.state) {
+      handleIncoming(payload.state);
+    }
+  });
+
+  return () => {
+    bcs.forEach((bc) => bc.close());
+    mqtt.close();
   };
 }
 

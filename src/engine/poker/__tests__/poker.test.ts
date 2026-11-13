@@ -547,11 +547,12 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
     const attemptedClaim = claimBankruptcyBonus();
     expect(attemptedClaim.bankroll).toBe(0); // NOT 200! Did NOT grant free chips!
 
-    // 3. Player cashes out from the room
+    // 3. Player cashes out from the room -> seat is cleanly vacated
     const { cashedOut, updatedState } = cashOutAndLeavePersistedRoom('ROOM99', profile.playerId);
     expect(cashedOut).toBe(200);
     expect(loadUserProfile().bankroll).toBe(200); // 200 chips safely returned to wallet!
-    expect(updatedState?.players.find((p) => p.id === profile.playerId)?.status).toBe('out');
+    expect(updatedState?.players.some((p) => p.id === profile.playerId)).toBe(false);
+    expect(getSeatedPlayersCount(updatedState!.players)).toBe(0);
 
     // 4. Test deleteOpenRoom auto-refunds seated chips if player hadn't cashed out yet
     savePlayerBankroll(0);
@@ -570,7 +571,105 @@ describe('User Profile, Card Back Themes & Playstyle Diamond Radar Metrics', () 
     // Chips were automatically refunded upon deleting room!
     expect(loadUserProfile().bankroll).toBe(150);
   });
+
+  it('blocks 0-chip free re-entry exploit, preserves active 2-player hands on 3rd join, and vacates seats cleanly', async () => {
+    const { vacatePlayerSeat } = await import('../gameState');
+
+    let table = createInitialTableState('SAFE1', 'real', false, 200);
+    // Host joins with 200
+    table = seatPlayerInTable(table, {
+      id: 'p_host',
+      name: 'Isaac',
+      avatarId: 'hero',
+      stack: 200,
+    }).state;
+    // Friend joins with 200 -> starts 2-player hand
+    table = seatPlayerInTable(table, {
+      id: 'p_friend',
+      name: 'Leo',
+      avatarId: 'leo',
+      stack: 200,
+    }).state;
+    expect(getSeatedPlayersCount(table.players)).toBe(2);
+    expect(table.street).toBe('preflop');
+    const hostCardsBefore = table.players[0].holeCards.map((card) => card.id);
+
+    // 0-chip new joiner must be rejected (no free 200 chips)
+    const zeroAttempt = seatPlayerInTable(table, {
+      id: 'p_broke',
+      name: 'Zero',
+      avatarId: 'emma',
+      stack: 0,
+    });
+    expect(zeroAttempt.changed).toBe(false);
+    expect(getSeatedPlayersCount(zeroAttempt.state.players)).toBe(2);
+
+    // 3rd player with chips joining mid-hand sits in folded for next hand without resetting live hand
+    const thirdJoin = seatPlayerInTable(table, {
+      id: 'p_third',
+      name: 'Marco',
+      avatarId: 'akash',
+      stack: 200,
+    });
+    expect(thirdJoin.changed).toBe(true);
+    expect(getSeatedPlayersCount(thirdJoin.state.players)).toBe(3);
+    expect(thirdJoin.state.players[0].holeCards.map((card) => card.id)).toEqual(hostCardsBefore);
+    const marcoSeat = thirdJoin.state.players.find((p) => p.id === 'p_third')!;
+    expect(marcoSeat.status).toBe('folded');
+    expect(marcoSeat.holeCards).toHaveLength(0);
+
+    // Vacating p_host mid-hand folds their hand and frees their seat to empty-0
+    const vacated = vacatePlayerSeat(thirdJoin.state, 'p_host');
+    expect(vacated.players.some((p) => p.id === 'p_host')).toBe(false);
+    expect(vacated.players[0].id).toBe('empty-0');
+    expect(getSeatedPlayersCount(vacated.players)).toBe(2);
+  });
+
+  it('resolves solo-host collisions by earlier createdAt, accepts valid cashouts, and breaks equal-version ties', async () => {
+    const { vacatePlayerSeat } = await import('../gameState');
+    const { shouldAcceptIncomingState } = await import('../../../lib/multiplayer');
+
+    // 1. Two solo hosts race on the same room -> later host adopts earlier host's createdAt
+    let earlierHost = createInitialTableState('SYNC1', 'real', false, 200);
+    earlierHost.createdAt = 1000;
+    earlierHost = seatPlayerInTable(earlierHost, {
+      id: 'p_early',
+      name: 'Early',
+      avatarId: 'hero',
+      stack: 200,
+    }).state;
+
+    let laterHost = createInitialTableState('SYNC1', 'real', false, 200);
+    laterHost.createdAt = 5000;
+    laterHost = seatPlayerInTable(laterHost, {
+      id: 'p_late',
+      name: 'Late',
+      avatarId: 'leo',
+      stack: 200,
+    }).state;
+
+    expect(shouldAcceptIncomingState(laterHost, earlierHost)).toBe(true);
+    expect(shouldAcceptIncomingState(earlierHost, laterHost)).toBe(false);
+
+    // 2. Valid departure / cashout (2 -> 1) when departed actor was seated & stateVersion incremented
+    const twoPlayers = seatPlayerInTable(earlierHost, {
+      id: 'p_late',
+      name: 'Late',
+      avatarId: 'leo',
+      stack: 200,
+    }).state;
+    const vacatedByLate = vacatePlayerSeat(twoPlayers, 'p_late');
+    expect(getSeatedPlayersCount(vacatedByLate.players)).toBe(1);
+    expect(shouldAcceptIncomingState(twoPlayers, vacatedByLate)).toBe(true);
+
+    // 3. Equal stateVersion & seatedCount deterministic tie-breaker on updatedBy
+    const actionA = { ...twoPlayers, stateVersion: (twoPlayers.stateVersion ?? 1) + 1, updatedBy: 'p_aaa' };
+    const actionB = { ...twoPlayers, stateVersion: (twoPlayers.stateVersion ?? 1) + 1, updatedBy: 'p_zzz' };
+    expect(shouldAcceptIncomingState(actionB, actionA)).toBe(true);
+    expect(shouldAcceptIncomingState(actionA, actionB)).toBe(false);
+  });
 });
+
 
 
 

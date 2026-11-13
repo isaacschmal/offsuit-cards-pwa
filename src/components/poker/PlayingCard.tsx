@@ -304,7 +304,11 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
 
   if (!first || !second) {
     return (
-      <div className="relative w-full h-[128px] flex items-center">
+      <div
+        className={`relative w-full h-[128px] flex items-center transition-opacity duration-200 ${
+          folded ? 'opacity-35' : 'opacity-100'
+        }`}
+      >
         <OffsuitCardBack className="w-[58%] h-full rounded-[22px]" />
         <OffsuitCardBack className="w-[58%] h-full rounded-[22px] -ml-[16%] shadow-[-10px_0_22px_rgba(0,0,0,0.28)]" />
       </div>
@@ -315,8 +319,9 @@ export const HoleCardsBlock: React.FC<HoleCardsBlockProps> = ({
   const secondRed = isRedSuit(second.suit);
   const dragEnabled = canDragToFold && !folded && !isThrown;
 
-  const firstHelped = heroBestFiveIds ? heroBestFiveIds.includes(first.id) : true;
-  const secondHelped = heroBestFiveIds ? heroBestFiveIds.includes(second.id) : true;
+  const canEvaluateBestFive = Boolean(heroBestFiveIds && heroBestFiveIds.length === 5);
+  const firstHelped = canEvaluateBestFive ? heroBestFiveIds!.includes(first.id) : true;
+  const secondHelped = canEvaluateBestFive ? heroBestFiveIds!.includes(second.id) : true;
   const firstIsWinner = Boolean(isShowdown && winningCardIds?.includes(first.id));
   const secondIsWinner = Boolean(isShowdown && winningCardIds?.includes(second.id));
 

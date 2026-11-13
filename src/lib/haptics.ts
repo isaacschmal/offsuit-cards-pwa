@@ -14,6 +14,7 @@ let iosSwitchLabel: HTMLLabelElement | null = null;
 let iosSwitchInput: HTMLInputElement | null = null;
 let sharedAudioCtx: AudioContext | null = null;
 let lastHapticTimestamp = 0;
+let lastPointerDownTimestamp = 0;
 let globalHapticsInitialized = false;
 
 function ensureIosHapticSwitch(): HTMLLabelElement | null {
@@ -167,16 +168,18 @@ export function initGlobalHaptics(): void {
       ) as HTMLElement | null;
 
       if (interactive && !(interactive as HTMLButtonElement).disabled) {
+        lastPointerDownTimestamp = Date.now();
         triggerHaptic('light');
       }
     },
     { capture: true, passive: true }
   );
 
-  // Fallback on click for keyboard navigation / non-pointer clicks
+  // Fallback on click strictly for keyboard / non-pointer activations
   document.addEventListener(
     'click',
     (ev) => {
+      if (Date.now() - lastPointerDownTimestamp < 600) return;
       const target = ev.target as Element | null;
       if (!target || typeof target.closest !== 'function') return;
       if (target === iosSwitchLabel || target === iosSwitchInput) return;

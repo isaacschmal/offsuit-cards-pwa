@@ -22,6 +22,10 @@ export interface ShowdownContenderResult {
 export interface PokerTableState {
   roomId: string;
   roomMode?: RoomPlayersMode;
+  pacingMode?: 'live' | 'async';
+  roomName?: string;
+  createdAt?: number;
+  turnStartedAt?: number;
   tableBuyIn?: number; // Configurable table buy-in (e.g. 100, 200, 300, 500)
   maxHands?: number | null; // Capped at 100 in bot mode, null in real multiplayer
   stateVersion?: number;
@@ -72,7 +76,9 @@ export function createInitialTableState(
   roomId = 'local-offsuit',
   roomMode: RoomPlayersMode = 'bots',
   useOpeningSeed = false,
-  buyIn = 200
+  buyIn = 200,
+  pacingMode: 'live' | 'async' = 'live',
+  roomName?: string
 ): PokerTableState {
   const isBotMode = roomMode === 'bots';
   // Bot tables are capped at maximum 100 chips buy-in to prevent farming
@@ -129,6 +135,10 @@ export function createInitialTableState(
   const baseState: PokerTableState = {
     roomId,
     roomMode,
+    pacingMode: isBotMode ? 'live' : pacingMode,
+    roomName: roomName?.trim() || undefined,
+    createdAt: Date.now(),
+    turnStartedAt: Date.now(),
     tableBuyIn: resolvedBuyIn,
     maxHands,
     stateVersion: 0,
@@ -169,8 +179,8 @@ export function seatPlayerInTable(
   const cleanName = participant.name.trim() || 'Jugador';
   const cleanAvatar = participant.avatarId || 'hero';
   const initialStack =
-    typeof participant.stack === 'number' && participant.stack > 0
-      ? Math.round(participant.stack)
+    typeof participant.stack === 'number'
+      ? Math.max(0, Math.round(participant.stack))
       : (state.tableBuyIn ?? 200);
 
   // In bots mode, keep seat 0 updated with local player's id and identity
@@ -206,13 +216,35 @@ export function seatPlayerInTable(
   const existingIdx = state.players.findIndex((p) => p.id === participant.id);
   if (existingIdx >= 0) {
     const existing = state.players[existingIdx];
-    if (existing.name !== cleanName || existing.avatarId !== cleanAvatar) {
+    const shouldRebuyDeadSeat =
+      existing.status === 'out' && existing.stack <= 0 && initialStack > 0;
+    if (
+      existing.name !== cleanName ||
+      existing.avatarId !== cleanAvatar ||
+      shouldRebuyDeadSeat
+    ) {
       const updatedPlayers = [...state.players];
       updatedPlayers[existingIdx] = {
         ...existing,
         name: cleanName,
         avatarId: cleanAvatar,
+        stack: shouldRebuyDeadSeat ? initialStack : existing.stack,
+        status: shouldRebuyDeadSeat ? 'folded' : existing.status,
       };
+      const seatedWithChips = updatedPlayers.filter(
+        (p) => !isVacantSeat(p) && p.status !== 'out' && p.stack > 0
+      );
+      if (shouldRebuyDeadSeat && seatedWithChips.length >= 2 && state.street === 'showdown') {
+        const nextHand = startNewHand(
+          {
+            ...state,
+            players: updatedPlayers,
+            updatedBy: participant.id,
+          },
+          false
+        );
+        return { state: nextHand, changed: true };
+      }
       return {
         state: {
           ...state,
@@ -223,6 +255,11 @@ export function seatPlayerInTable(
         changed: true,
       };
     }
+    return { state, changed: false };
+  }
+
+  // Never seat a brand-new player with 0 chips
+  if (initialStack <= 0) {
     return { state, changed: false };
   }
 
@@ -247,13 +284,15 @@ export function seatPlayerInTable(
     };
   }
 
-  // Find first vacant seat ('empty-1' .. 'empty-5')
+  // Find first vacant seat ('empty-0' .. 'empty-5')
   const emptyIdx = state.players.findIndex((p) => isVacantSeat(p));
   if (emptyIdx === -1) {
     return { state, changed: false };
   }
 
-  const prevSeatedCount = getSeatedPlayersCount(state.players);
+  const prevSeatedWithChips = state.players.filter(
+    (p) => !isVacantSeat(p) && p.status !== 'out' && p.stack > 0
+  ).length;
   const updatedPlayers = [...state.players];
   updatedPlayers[emptyIdx] = {
     id: participant.id,
@@ -269,24 +308,21 @@ export function seatPlayerInTable(
     seatIndex: emptyIdx,
   };
 
-  // If table was waiting for a 2nd player, or is preflop with 0 actions taken yet, deal a fresh hand for everyone
-  if (
-    prevSeatedCount < 2 ||
-    (state.street === 'preflop' && state.actedPlayerIds.length === 0)
-  ) {
+  // Deal a fresh hand immediately ONLY when the table was waiting for a 2nd active player
+  if (prevSeatedWithChips < 2) {
     const nextState = startNewHand(
       {
         ...state,
         players: updatedPlayers,
         handNumber: Math.max(0, state.handNumber - 1),
-        updatedBy: state.players[0]?.id ?? participant.id,
+        updatedBy: participant.id,
       },
       false
     );
     return { state: nextState, changed: true };
   }
 
-  // Otherwise seat them folded for the current hand so they get dealt in on the next hand
+  // Otherwise seat them folded for the current hand so they get dealt in cleanly on the next hand
   updatedPlayers[emptyIdx] = {
     ...updatedPlayers[emptyIdx],
     status: 'folded',
@@ -789,6 +825,7 @@ function advanceStreetOrShowdown(state: PokerTableState): PokerTableState {
 
   return {
     ...state,
+    turnStartedAt: Date.now(),
     players: resetPlayers,
     communityCards: newCommunity,
     deck: newDeck,
@@ -935,6 +972,7 @@ export function applyPlayerAction(
     ...state,
     stateVersion: nextVersion,
     updatedBy: playerId,
+    turnStartedAt: Date.now(),
     players: updatedPlayers,
     currentTurnIndex: nextTurnIndex,
     currentHighestBet,
@@ -987,12 +1025,79 @@ export function forceFoldPlayerForLeave(
     });
   }
 
+  const activePlayers = updatedPlayers.filter(
+    (p) => !isVacantSeat(p) && p.status === 'active'
+  );
+  const allActiveActedAndMatched = activePlayers.every(
+    (p) => actedPlayerIds.includes(p.id) && p.currentBet === state.currentHighestBet
+  );
+  if (allActiveActedAndMatched || activePlayers.length === 0) {
+    return advanceStreetOrShowdown({
+      ...state,
+      stateVersion: nextVersion,
+      updatedBy: playerId,
+      players: updatedPlayers,
+      actedPlayerIds,
+    });
+  }
+
   return {
     ...state,
     stateVersion: nextVersion,
     updatedBy: playerId,
     players: updatedPlayers,
     actedPlayerIds,
+  };
+}
+
+/**
+ * Folds a departing player if mid-hand and restores their seat to vacant ('empty-X')
+ * so other players (or the same player rejoining later) can sit down cleanly.
+ */
+export function vacatePlayerSeat(
+  state: PokerTableState,
+  playerId: string
+): PokerTableState {
+  const seatedCount = getSeatedPlayersCount(state.players);
+  let nextState = state;
+
+  const currentIdx = nextState.players.findIndex(
+    (p) => p.id === playerId || (playerId && p.id === 'hero')
+  );
+  if (currentIdx === -1) return state;
+
+  const targetPlayer = nextState.players[currentIdx];
+  if (
+    seatedCount >= 2 &&
+    nextState.street !== 'showdown' &&
+    targetPlayer.status === 'active'
+  ) {
+    nextState = forceFoldPlayerForLeave(nextState, targetPlayer.id);
+  }
+
+  const vacatedPlayers = nextState.players.map((p, idx) =>
+    idx === currentIdx
+      ? {
+          id: `empty-${idx}`,
+          name: 'Esperando...',
+          avatarId: 'empty',
+          stack: 0,
+          currentBet: 0,
+          totalHandBet: 0,
+          holeCards: [],
+          status: 'out' as const,
+          lastAction: null,
+          isBot: false,
+          seatIndex: idx,
+        }
+      : p
+  );
+
+  return {
+    ...nextState,
+    players: vacatedPlayers,
+    stateVersion: (nextState.stateVersion ?? 1) + 1,
+    updatedBy: playerId,
   };
 }
 

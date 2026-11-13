@@ -32,6 +32,8 @@ import { Avatar3D } from './Avatar3D';
 import { CommunityCardSlot, HoleCardsBlock } from './PlayingCard';
 import { TopOpponentsRow } from './TopOpponentsRow';
 
+const LIVE_TURN_SECONDS = 25;
+
 interface PokerTableProps {
   initialState: PokerTableState;
   onBack: (finalStack?: number, shouldCashOut?: boolean) => void;
@@ -56,10 +58,14 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   const [profileState, setProfileState] = useState(() => loadUserProfile());
   const [copiedRoomInvite, setCopiedRoomInvite] = useState(false);
   const [isLeaveConfirmOpen, setIsLeaveConfirmOpen] = useState(false);
+  const [turnSecondsLeft, setTurnSecondsLeft] = useState<number>(LIVE_TURN_SECONDS);
   const prevTurnIndexRef = useRef<number>(initialState.currentTurnIndex);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const fallbackTurnStartRef = useRef<number>(Date.now());
+  const lastTimeoutKeyRef = useRef<string>('');
 
   const currentLang: SupportedLanguage = profileState.language ?? 'es';
+  const effectivePacingMode: RoomPacingMode = tableState.pacingMode ?? pacingMode;
 
   useEffect(() => {
     const syncProfile = () => {
@@ -70,19 +76,38 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   }, []);
 
   useEffect(() => {
-    if (externalState) {
-      // Never let external state overwrite local bot practice games
-      if (tableState.roomMode === 'bots') return;
-      if (
-        externalState.handNumber < tableState.handNumber ||
-        (externalState.handNumber === tableState.handNumber &&
-          (externalState.stateVersion ?? 0) <= (tableState.stateVersion ?? 0))
-      ) {
-        return;
-      }
+    if (!externalState) return;
+    if (tableState.roomMode === 'bots') return;
+    if (externalState.roomId !== tableState.roomId) {
+      setTableState(externalState);
+      return;
+    }
+
+    const externalSeated = getSeatedPlayersCount(externalState.players);
+    const localSeated = getSeatedPlayersCount(tableState.players);
+    const extVer = externalState.stateVersion ?? 0;
+    const locVer = tableState.stateVersion ?? 0;
+
+    // Accept if room grows in players, advances hand/version, adopts an earlier 1-player host, or handles an explicit leave with higher version
+    const isGrowth = externalSeated > localSeated;
+    const isNewerHandOrVersion =
+      externalState.handNumber > tableState.handNumber ||
+      (externalState.handNumber === tableState.handNumber && extVer > locVer);
+    const isValidDeparture =
+      localSeated >= 2 &&
+      externalSeated < 2 &&
+      externalState.handNumber >= tableState.handNumber &&
+      extVer > locVer;
+    const isEarlierHostAdoption =
+      localSeated === 1 &&
+      externalSeated === 1 &&
+      (externalState.createdAt ?? Number.MAX_SAFE_INTEGER) <
+        (tableState.createdAt ?? Number.MAX_SAFE_INTEGER);
+
+    if (isGrowth || isEarlierHostAdoption || isValidDeparture || (isNewerHandOrVersion && (externalSeated >= 2 || localSeated < 2))) {
       setTableState(externalState);
     }
-  }, [externalState, tableState.roomMode, tableState.handNumber, tableState.stateVersion]);
+  }, [externalState, tableState]);
 
   const resolvedHeroIndex = useMemo(() => {
     const idx = tableState.players.findIndex((p) => p.id === profileState.playerId);
@@ -111,17 +136,97 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     hero.status === 'active';
 
   const toCall = Math.max(0, tableState.currentHighestBet - hero.currentBet);
+  const callAmount = Math.min(toCall, hero.stack);
   const maxHeroBet = hero.currentBet + hero.stack;
-  const minRaiseBet = Math.min(
-    maxHeroBet,
-    Math.max(tableState.minRaiseTo, tableState.bigBlind * 2)
-  );
+  const minRaiseBet = Math.min(maxHeroBet, tableState.minRaiseTo);
 
   // Keep sliderAmount synced when turn or minRaiseBet updates
   useEffect(() => {
     setSliderAmount(minRaiseBet);
     setIsSliderOpen(false);
   }, [tableState.handNumber, tableState.street, minRaiseBet]);
+
+  // Reset local fallback anchor whenever the turn or street changes
+  useEffect(() => {
+    fallbackTurnStartRef.current = tableState.turnStartedAt ?? Date.now();
+  }, [tableState.handNumber, tableState.street, tableState.currentTurnIndex, tableState.turnStartedAt]);
+
+  // Live mode (~25s) turn countdown + automatic check/fold timeout protection so AFK peers never freeze the table
+  useEffect(() => {
+    if (
+      !isRealFriendsRoom ||
+      effectivePacingMode !== 'live' ||
+      seatedCount < 2 ||
+      tableState.street === 'showdown' ||
+      !currentActor ||
+      currentActor.status !== 'active'
+    ) {
+      setTurnSecondsLeft(LIVE_TURN_SECONDS);
+      return;
+    }
+
+    const updateTimer = () => {
+      const anchor = tableState.turnStartedAt ?? fallbackTurnStartRef.current;
+      const elapsedSec = Math.floor((Date.now() - anchor) / 1000);
+      const remaining = Math.max(0, LIVE_TURN_SECONDS - elapsedSec);
+      setTurnSecondsLeft(remaining);
+
+      const turnKey = `${tableState.handNumber}-${tableState.street}-${tableState.currentTurnIndex}-${tableState.stateVersion ?? 0}`;
+      const actorToCall = Math.max(0, tableState.currentHighestBet - currentActor.currentBet);
+      const timeoutAction: PlayerActionInput =
+        actorToCall === 0 ? { type: 'check' } : { type: 'fold' };
+
+      // Hero's own turn timed out -> auto-check or auto-fold immediately
+      if (isHeroTurn && elapsedSec >= LIVE_TURN_SECONDS && lastTimeoutKeyRef.current !== turnKey) {
+        lastTimeoutKeyRef.current = turnKey;
+        recordPlayerActionStats(timeoutAction);
+        const next = applyPlayerAction(tableState, hero.id, timeoutAction);
+        if (next.street === 'showdown') {
+          recordHandCompletedStats(next, hero.id);
+        }
+        setIsSliderOpen(false);
+        setTableState(next);
+        savePersistedRoomState(next.roomId, next);
+        onBroadcastState?.(next);
+        return;
+      }
+
+      // Disconnected/AFK opponent timed out (+5s grace period): first other seated human advances the hand cleanly
+      if (
+        !isHeroTurn &&
+        !currentActor.isBot &&
+        elapsedSec >= LIVE_TURN_SECONDS + 5 &&
+        lastTimeoutKeyRef.current !== turnKey
+      ) {
+        const firstOtherHuman = tableState.players.find(
+          (p) => !isVacantSeat(p) && !p.isBot && p.id !== currentActor.id && p.status !== 'out'
+        );
+        if (firstOtherHuman && firstOtherHuman.id === hero.id) {
+          lastTimeoutKeyRef.current = turnKey;
+          const next = applyPlayerAction(tableState, currentActor.id, timeoutAction);
+          if (next.street === 'showdown') {
+            recordHandCompletedStats(next, hero.id);
+          }
+          setTableState(next);
+          savePersistedRoomState(next.roomId, next);
+          onBroadcastState?.(next);
+        }
+      }
+    };
+
+    updateTimer();
+    const interval = window.setInterval(updateTimer, 500);
+    return () => window.clearInterval(interval);
+  }, [
+    isRealFriendsRoom,
+    effectivePacingMode,
+    seatedCount,
+    tableState,
+    currentActor,
+    isHeroTurn,
+    hero.id,
+    onBroadcastState,
+  ]);
 
   // Trigger PWA / Web Notification when turn transitions from an opponent to Hero in async mode
   useEffect(() => {
@@ -135,7 +240,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       tableState.street !== 'showdown' &&
       hero.status === 'active'
     ) {
-      if (pacingMode === 'async' || (typeof document !== 'undefined' && document.hidden)) {
+      if (effectivePacingMode === 'async' || (typeof document !== 'undefined' && document.hidden)) {
         void notifyPlayerTurn(roomName, tableState.roomId, tableState);
       }
     }
@@ -144,7 +249,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     resolvedHeroIndex,
     seatedCount,
     hero.status,
-    pacingMode,
+    effectivePacingMode,
     roomName,
   ]);
 
@@ -191,14 +296,16 @@ export const PokerTable: React.FC<PokerTableProps> = ({
   const handleShareRoomLink = async () => {
     const shareUrl = `${window.location.origin}/?room=${encodeURIComponent(tableState.roomId)}`;
     const shareText =
-      `🃏 Únete a mi mesa de póker #${tableState.roomId}:\n\n` +
-      `1️⃣ Si tienes la app instalada en tu pantalla de inicio: Abre 'Cartas' y entra a la sala #${tableState.roomId}\n` +
-      `2️⃣ O entra directo desde el navegador:\n${shareUrl}`;
+      currentLang === 'en'
+        ? `🃏 Join my poker table #${tableState.roomId}:\n\n1️⃣ If installed on your Home Screen: Open 'Card Games' and enter code #${tableState.roomId}\n2️⃣ Or join directly in browser:\n${shareUrl}`
+        : currentLang === 'it'
+        ? `🃏 Unisciti al mio tavolo di poker #${tableState.roomId}:\n\n1️⃣ Se hai l'app sulla Home: Apri 'Giochi di Carte' e inserisci #${tableState.roomId}\n2️⃣ Oppure entra dal browser:\n${shareUrl}`
+        : `🃏 Únete a mi mesa de póker #${tableState.roomId}:\n\n1️⃣ Si tienes la app instalada en tu pantalla de inicio: Abre 'Cartas' y entra a la sala #${tableState.roomId}\n2️⃣ O entra directo desde el navegador:\n${shareUrl}`;
 
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: `Mesa #${tableState.roomId} · Cartas`,
+          title: `${t(currentLang, 'tableLabel')} #${tableState.roomId} · ${t(currentLang, 'appTitle')}`,
           text: shareText,
           url: shareUrl,
         });
@@ -248,13 +355,12 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
   const handleCashOutAndLeave = () => {
     triggerHaptic('medium');
-    const hasActiveChipsInPot =
+    const needsFoldOnLeave =
       seatedCount >= 2 &&
       tableState.street !== 'showdown' &&
-      hero.status === 'active' &&
-      hero.totalHandBet > 0;
+      hero.status === 'active';
 
-    if (hasActiveChipsInPot) {
+    if (needsFoldOnLeave) {
       recordPlayerActionStats({ type: 'fold' });
       const foldedState = forceFoldPlayerForLeave(tableState, hero.id);
       if (foldedState.street === 'showdown') {
@@ -308,6 +414,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
       ...tableState,
       players: updatedPlayers,
       stateVersion: (tableState.stateVersion ?? 1) + 1,
+      updatedBy: hero.id,
     };
     setTableState(nextState);
     savePersistedRoomState(nextState.roomId, nextState);
@@ -395,6 +502,15 @@ export const PokerTable: React.FC<PokerTableProps> = ({
     }
   };
 
+  const isWaitingForNewHand =
+    isRealFriendsRoom &&
+    seatedCount >= 2 &&
+    tableState.street !== 'showdown' &&
+    hero.holeCards.length === 0 &&
+    hero.status !== 'out';
+
+  const isBustedWaiting = hero.stack <= 0 && hero.status === 'out';
+
   return (
     <div className="h-[100dvh] max-h-[100dvh] overflow-hidden w-full bg-black text-white flex justify-center select-none">
       <div
@@ -411,35 +527,48 @@ export const PokerTable: React.FC<PokerTableProps> = ({
               type="button"
               onClick={handleBackButtonClick}
               onPointerDown={(e) => e.stopPropagation()}
-              aria-label="Salir al menú"
+              aria-label={t(currentLang, 'exitTable')}
               className="z-40 w-12 h-12 -ml-2 flex items-center justify-center rounded-full text-white hover:bg-white/10 active:bg-white/20 active:scale-95 touch-manipulation cursor-pointer"
             >
               <ArrowLeft className="w-6 h-6 stroke-[2.2]" />
             </button>
 
             {isRealFriendsRoom ? (
-              <button
-                type="button"
-                onClick={handleShareRoomLink}
-                className="z-30 text-[11px] px-3 py-1.5 rounded-full font-medium border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
-              >
-                {copiedRoomInvite ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>{t(currentLang, 'tableInviteCopied', { id: tableState.roomId })}</span>
-                  </>
-                ) : (
-                  <>
-                    <span>
-                      {t(currentLang, 'tableRoomInvite', {
-                        id: tableState.roomId,
-                        count: seatedCount,
-                      })}
-                    </span>
-                    <Share2 className="w-3 h-3 opacity-80" />
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`text-[10px] px-2 py-1 rounded-full font-medium border ${
+                    effectivePacingMode === 'async'
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                      : 'bg-white/5 border-white/15 text-white/75'
+                  }`}
+                >
+                  {effectivePacingMode === 'async'
+                    ? t(currentLang, 'pacingTurnsShort')
+                    : t(currentLang, 'pacingLiveShort')}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleShareRoomLink}
+                  className="z-30 text-[11px] px-3 py-1.5 rounded-full font-medium border bg-emerald-500/10 border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 active:scale-95 transition-transform cursor-pointer"
+                >
+                  {copiedRoomInvite ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{t(currentLang, 'tableInviteCopied', { id: tableState.roomId })}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>
+                        {t(currentLang, 'tableRoomInvite', {
+                          id: tableState.roomId,
+                          count: seatedCount,
+                        })}
+                      </span>
+                      <Share2 className="w-3 h-3 opacity-80" />
+                    </>
+                  )}
+                </button>
+              </div>
             ) : (
               <span className="text-[11px] px-2.5 py-1 rounded-full font-medium border bg-indigo-500/10 border-indigo-500/30 text-indigo-300">
                 {t(currentLang, 'practiceBotsBadge', {
@@ -495,7 +624,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
         {/* BOTTOM SECTION: Action Controls + Split 2-Column HUD */}
         <div className="flex flex-col gap-2 shrink-0">
-          {/* Hero's own current round bet badge + status indicator */}
+          {/* Hero's own current round bet badge + status indicator + Live clock */}
           <div className="min-h-[22px] flex items-center justify-between px-2">
             <div>
               {hero.currentBet > 0 && (
@@ -507,148 +636,188 @@ export const PokerTable: React.FC<PokerTableProps> = ({
 
             {isRealFriendsRoom && seatedCount < 2 && (
               <div className="flex items-center gap-2 text-[11px] text-[#9ca3af]">
-                <span>Esperando amigos en #{tableState.roomId}...</span>
+                <span>{t(currentLang, 'waitingForFriends', { id: tableState.roomId })}</span>
                 <button
                   type="button"
                   onClick={handleShareRoomLink}
                   className="px-2.5 py-0.5 rounded-full bg-white text-black font-semibold cursor-pointer active:scale-95"
                 >
-                  {copiedRoomInvite ? '¡Copiado!' : 'Invitar amigo'}
+                  {copiedRoomInvite ? t(currentLang, 'copied') : t(currentLang, 'inviteFriendBtn')}
                 </button>
               </div>
             )}
 
-            {/* In Real Friends Mode with 2+ players, show read-only status when waiting on another player's turn */}
+            {/* Turn status + Live 25s countdown OR Async indicator */}
             {isRealFriendsRoom &&
               seatedCount >= 2 &&
               tableState.street !== 'showdown' &&
               currentActor &&
-              currentActor.id !== hero.id &&
               !isVacantSeat(currentActor) && (
-                <div className="flex items-center gap-1.5 text-[11.5px] text-[#8e9099]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  <span>{t(currentLang, 'currentTurnWaiting', { name: currentActor.name })}</span>
+                <div className="flex items-center gap-2 text-[11.5px] text-[#8e9099] ml-auto">
+                  {currentActor.id !== hero.id ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                      <span>{t(currentLang, 'currentTurnWaiting', { name: currentActor.name })}</span>
+                    </div>
+                  ) : isWaitingForNewHand ? (
+                    <span className="text-[#9ca3af]">{t(currentLang, 'waitingNextHand')}</span>
+                  ) : null}
+
+                  {effectivePacingMode === 'live' ? (
+                    <span
+                      className={`px-2 py-0.5 rounded-full font-mono text-[10.5px] font-semibold border ${
+                        turnSecondsLeft <= 6
+                          ? 'bg-red-500/15 border-red-500/40 text-red-400'
+                          : isHeroTurn
+                          ? 'bg-white/10 border-white/25 text-white'
+                          : 'bg-[#1a1b1f] border-[#262830] text-[#9ca3af]'
+                      }`}
+                    >
+                      {turnSecondsLeft}s
+                    </span>
+                  ) : (
+                    <span className="text-[10.5px] text-[#7c7d85]">
+                      {t(currentLang, 'noClockAsync')}
+                    </span>
+                  )}
                 </div>
               )}
           </div>
 
           {/* Action Controls Row */}
-          {tableState.street === 'showdown' ? (
-            isBotSessionFinished ? (
-              <div className="h-[46px] flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => onBack(hero.stack)}
-                  className="w-full h-[46px] rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
-                >
-                  <span>
-                    {allBotsEliminated
-                      ? t(currentLang, 'allBotsEliminated')
-                      : t(currentLang, 'maxHandsReached')}
-                    {' · '}
-                    {t(currentLang, 'cashOutToMenu', { stack: hero.stack })}
-                  </span>
-                </button>
-              </div>
-            ) : hero.stack <= 0 ? (
-              <div className="h-[46px] flex items-center gap-2">
-                {profileState.bankroll > 0 ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleRebuy}
-                      className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-amber-500/50 text-amber-300 text-[12.5px] font-medium flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
-                    >
-                      <span>
-                        {t(currentLang, 'rebuyBuyIn', {
-                          amount: Math.min(
-                            profileState.bankroll,
-                            tableState.tableBuyIn ??
-                              (tableState.roomMode === 'bots' ? 100 : 200)
-                          ),
-                        })}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onBack(0)}
-                      className="h-[46px] px-4 rounded-full bg-[#16171a] border border-[#23252a] text-[#9ca3af] text-[13px] font-medium active:scale-95 cursor-pointer"
-                    >
-                      {t(currentLang, 'exitTable')}
-                    </button>
-                  </>
-                ) : (
+          {isRealFriendsRoom && seatedCount < 2 && !isBustedWaiting ? (
+            <div className="h-[46px] flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleShareRoomLink}
+                className="w-full h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-[#d1d5db] text-[13.5px] font-medium flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
+              >
+                <Share2 className="w-4 h-4 text-emerald-400" />
+                <span>
+                  {copiedRoomInvite
+                    ? t(currentLang, 'tableInviteCopied', { id: tableState.roomId })
+                    : t(currentLang, 'waitingSoloHost', { id: tableState.roomId })}
+                </span>
+              </button>
+            </div>
+          ) : (tableState.street === 'showdown' && isBotSessionFinished) ? (
+            <div className="h-[46px] flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onBack(hero.stack, true)}
+                className="w-full h-[46px] rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[13px] font-semibold flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
+              >
+                <span>
+                  {allBotsEliminated
+                    ? t(currentLang, 'allBotsEliminated')
+                    : t(currentLang, 'maxHandsReached')}
+                  {' · '}
+                  {t(currentLang, 'cashOutToMenu', { stack: hero.stack })}
+                </span>
+              </button>
+            </div>
+          ) : isBustedWaiting || (tableState.street === 'showdown' && hero.stack <= 0) ? (
+            <div className="h-[46px] flex items-center gap-2">
+              {profileState.bankroll > 0 ? (
+                <>
                   <button
                     type="button"
-                    onClick={() => onBack(0)}
-                    className="w-full h-[46px] rounded-full bg-red-500/15 border border-red-500/35 text-red-300 text-[13px] font-medium flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+                    onClick={handleRebuy}
+                    className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-amber-500/50 text-amber-300 text-[12.5px] font-medium flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
                   >
                     <span>
-                      {currentLang === 'en'
-                        ? 'Bankrupt (0 chips) · Exit to menu'
-                        : currentLang === 'it'
-                        ? 'Bancarotta (0 chip) · Esci al menu'
-                        : 'Bancarrota (0 fichas) · Salir al menú'}
+                      {t(currentLang, 'rebuyBuyIn', {
+                        amount: Math.min(
+                          profileState.bankroll,
+                          tableState.tableBuyIn ??
+                            (tableState.roomMode === 'bots' ? 100 : 200)
+                        ),
+                      })}
                     </span>
                   </button>
-                )}
-              </div>
-            ) : (
-              <div className="h-[46px] flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onBack(0, true)}
+                    className="h-[46px] px-4 rounded-full bg-[#16171a] border border-[#23252a] text-[#9ca3af] text-[13px] font-medium active:scale-95 cursor-pointer"
+                  >
+                    {t(currentLang, 'exitTable')}
+                  </button>
+                </>
+              ) : (
                 <button
                   type="button"
-                  onClick={handleDealNextHand}
-                  className="w-full h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-medium flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
+                  onClick={() => onBack(0, true)}
+                  className="w-full h-[46px] rounded-full bg-red-500/15 border border-red-500/35 text-red-300 text-[13px] font-medium flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
                 >
-                  {(() => {
-                    const isHeroWinner =
-                      tableState.winnerIds.includes(hero.id) ||
-                      tableState.winnerIds.includes(profileState.playerId) ||
-                      (resolvedHeroIndex === 0 &&
-                        (tableState.winnerIds.includes('hero') ||
-                          tableState.winnerIds.includes(tableState.players[0]?.id)));
-                    const winnerName = isHeroWinner
-                      ? currentLang === 'en'
-                        ? 'You'
-                        : currentLang === 'it'
-                        ? 'Hai vinto'
-                        : 'Ganaste'
-                      : tableState.players.find((p) =>
-                          tableState.winnerIds.includes(p.id)
-                        )?.name ?? t(currentLang, 'playerFallback');
-                    const wonText = isHeroWinner
-                      ? currentLang === 'en'
-                        ? `You won ${tableState.collectedPot} chips`
-                        : currentLang === 'it'
-                        ? `Hai vinto ${tableState.collectedPot} chip`
-                        : `Ganaste ${tableState.collectedPot} fichas`
-                      : currentLang === 'en'
-                      ? `${winnerName} won ${tableState.collectedPot} chips`
+                  <span>
+                    {currentLang === 'en'
+                      ? 'Bankrupt (0 chips) · Exit to menu'
                       : currentLang === 'it'
-                      ? `${winnerName} ha vinto ${tableState.collectedPot} chip`
-                      : `${winnerName} ganó ${tableState.collectedPot} fichas`;
-                    const handLabel = tableState.winningHandName
-                      ? ` · ${formatHandName(tableState.winningHandName, currentLang)}`
-                      : '';
-                    const nextHandText =
-                      currentLang === 'en'
-                        ? '· Next hand →'
-                        : currentLang === 'it'
-                        ? '· Prossima mano →'
-                        : '· Siguiente mano →';
-                    return (
-                      <>
-                        <span>
-                          {wonText}
-                          {handLabel}
-                        </span>
-                        <span className="text-[#7c7d85] ml-1">{nextHandText}</span>
-                      </>
-                    );
-                  })()}
+                      ? 'Bancarotta (0 chip) · Esci al menu'
+                      : 'Bancarrota (0 fichas) · Salir al menú'}
+                  </span>
                 </button>
-              </div>
-            )
+              )}
+            </div>
+          ) : tableState.street === 'showdown' ? (
+            <div className="h-[46px] flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDealNextHand}
+                className="w-full h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[14px] font-medium flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer"
+              >
+                {(() => {
+                  const isHeroWinner =
+                    tableState.winnerIds.includes(hero.id) ||
+                    tableState.winnerIds.includes(profileState.playerId) ||
+                    (resolvedHeroIndex === 0 &&
+                      (tableState.winnerIds.includes('hero') ||
+                        tableState.winnerIds.includes(tableState.players[0]?.id)));
+                  const winnerName = isHeroWinner
+                    ? currentLang === 'en'
+                      ? 'You'
+                      : currentLang === 'it'
+                      ? 'Hai vinto'
+                      : 'Ganaste'
+                    : tableState.players.find((p) =>
+                        tableState.winnerIds.includes(p.id)
+                      )?.name ?? t(currentLang, 'playerFallback');
+                  const wonText = isHeroWinner
+                    ? currentLang === 'en'
+                      ? `You won ${tableState.collectedPot} chips`
+                      : currentLang === 'it'
+                      ? `Hai vinto ${tableState.collectedPot} chip`
+                      : `Ganaste ${tableState.collectedPot} fichas`
+                    : currentLang === 'en'
+                    ? `${winnerName} won ${tableState.collectedPot} chips`
+                    : currentLang === 'it'
+                    ? `${winnerName} ha vinto ${tableState.collectedPot} chip`
+                    : `${winnerName} ganó ${tableState.collectedPot} fichas`;
+                  const handLabel = tableState.winningHandName
+                    ? ` · ${formatHandName(tableState.winningHandName, currentLang)}`
+                    : '';
+                  const nextHandText =
+                    currentLang === 'en'
+                      ? '· Next hand →'
+                      : currentLang === 'it'
+                      ? '· Prossima mano →'
+                      : '· Siguiente mano →';
+                  return (
+                    <>
+                      <span>
+                        {wonText}
+                        {handLabel}
+                      </span>
+                      <span className="text-[#7c7d85] ml-1">{nextHandText}</span>
+                    </>
+                  );
+                })()}
+              </button>
+            </div>
+          ) : isWaitingForNewHand ? (
+            <div className="h-[46px] flex items-center justify-center rounded-full bg-[#16171a] border border-[#23252a] text-[#9ca3af] text-[13px] font-medium">
+              {t(currentLang, 'waitingNextHand')}
+            </div>
           ) : isSliderOpen ? (
             /* CUSTOM RAISE SLIDER MODE */
             <div className="flex flex-col gap-2">
@@ -728,7 +897,11 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                 }
                 className="flex-1 h-[46px] rounded-full bg-[#16171a] border border-[#23252a] text-white text-[15px] font-normal active:bg-[#1f2025] disabled:opacity-45 cursor-pointer"
               >
-                {toCall === 0 ? t(currentLang, 'check') : `${t(currentLang, 'call')} ${toCall}`}
+                {toCall === 0
+                  ? t(currentLang, 'check')
+                  : hero.stack <= toCall
+                  ? `${t(currentLang, 'allIn')} ${callAmount}`
+                  : `${t(currentLang, 'call')} ${callAmount}`}
               </button>
 
               <button
@@ -917,7 +1090,9 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                     </span>
                   </div>
                   <span className="text-[11px] text-emerald-400/80 mt-1">
-                    {hero.totalHandBet > 0
+                    {seatedCount >= 2 &&
+                    tableState.street !== 'showdown' &&
+                    hero.status === 'active'
                       ? currentLang === 'en'
                         ? 'Folds current hand & credits remaining chips to total balance.'
                         : currentLang === 'it'
@@ -952,7 +1127,7 @@ export const PokerTable: React.FC<PokerTableProps> = ({
                       </span>
                     </span>
                     <span className="text-[11px] text-[#9ca3af] font-mono">
-                      {hero.stack} en mesa
+                      {t(currentLang, 'atTableChips', { amount: hero.stack })}
                     </span>
                   </div>
                   <span className="text-[11px] text-[#9ca3af] mt-1">

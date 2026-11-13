@@ -9,11 +9,18 @@ import {
   connectMqttTopics,
   getPartyKitWebSocketUrl,
   isPartyKitConfigured,
+  loadOpenRooms,
   loadPersistedRoomState,
   savePersistedRoomState,
   shouldAcceptIncomingState,
+  upsertOpenRoom,
 } from './multiplayer';
-import { loadUserProfile, upsertKnownPlayer } from './profile';
+import {
+  deductTableBuyIn,
+  loadUserProfile,
+  returnTableStack,
+  upsertKnownPlayer,
+} from './profile';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -47,7 +54,8 @@ export function connectToPokerRoom(
   playerId: string,
   playerName: string,
   onStateReceived: (state: PokerTableState) => void,
-  onPresenceChange?: (count: number) => void
+  onPresenceChange?: (count: number) => void,
+  initialPaidStack?: number
 ): RoomSyncHandle {
   const normalizedCode = roomCode.trim().toUpperCase();
 
@@ -64,6 +72,10 @@ export function connectToPokerRoom(
   const eventsTopic = `cartas/v5/room/${normalizedCode}/events`;
   let hasReceivedPeerTableState = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let soloPublishTimer: ReturnType<typeof setTimeout> | null = null;
+  let committedStackForJoin =
+    typeof initialPaidStack === 'number' ? Math.max(0, Math.round(initialPaidStack)) : 0;
+  let hasReconciledRemoteSeat = false;
 
   // Always keep a local BroadcastChannel for instant zero-latency multi-tab sync
   const bc =
@@ -71,22 +83,79 @@ export function connectToPokerRoom(
       ? new BroadcastChannel(`cartas-room-${normalizedCode}`)
       : null;
 
-  // Cross-device zero-config MQTT over WebSockets (dual-broker redundancy)
-  const mqtt = connectMqttTopics([stateTopic, eventsTopic], (topic, data) => {
-    const payload = data as {
-      type?: string;
-      state?: PokerTableState;
-      player?: { id: string; name: string; avatarId: string; xp?: number; stack?: number };
-    };
+  function sendJoinAndSyncRequest(): void {
+    const freshProfile = loadUserProfile();
+    const localSaved = loadPersistedRoomState(normalizedCode);
+    const localMe = localSaved?.players.find((p) => p.id === freshProfile.playerId);
+    const stackForJoin =
+      localMe && localMe.stack > 0 && localMe.status !== 'out'
+        ? localMe.stack
+        : committedStackForJoin > 0
+        ? committedStackForJoin
+        : (localSaved?.tableBuyIn ?? 200);
 
-    if (topic === stateTopic && payload?.type === 'table_state' && payload.state) {
-      handleIncomingTableState(payload.state);
-    } else if (topic === eventsTopic && payload?.type === 'join_request' && payload.player) {
-      handleIncomingJoinRequest(payload.player);
-    } else if (topic === eventsTopic && payload?.type === 'sync_request') {
-      handleIncomingSyncRequest();
+    const joinPayload = {
+      type: 'join_request',
+      player: {
+        id: freshProfile.playerId || playerId,
+        name: freshProfile.name || playerName || 'Jugador',
+        avatarId: freshProfile.avatarId || 'hero',
+        xp: freshProfile.xp,
+        stack: stackForJoin,
+      },
+    };
+    const syncReqPayload = {
+      type: 'sync_request',
+      playerId: freshProfile.playerId || playerId,
+    };
+    bc?.postMessage(joinPayload);
+    bc?.postMessage(syncReqPayload);
+    mqtt.publish(eventsTopic, joinPayload, false);
+    mqtt.publish(eventsTopic, syncReqPayload, false);
+  }
+
+  // Cross-device zero-config MQTT over WebSockets (dual-broker redundancy)
+  const mqtt = connectMqttTopics(
+    [stateTopic, eventsTopic],
+    (topic, data) => {
+      const payload = data as {
+        type?: string;
+        state?: PokerTableState;
+        player?: { id: string; name: string; avatarId: string; xp?: number; stack?: number };
+      };
+
+      if (topic === stateTopic && payload?.type === 'table_state' && payload.state) {
+        handleIncomingTableState(payload.state);
+      } else if (topic === eventsTopic && payload?.type === 'join_request' && payload.player) {
+        handleIncomingJoinRequest(payload.player);
+      } else if (topic === eventsTopic && payload?.type === 'sync_request') {
+        handleIncomingSyncRequest();
+      }
+    },
+    {
+      onConnected: () => {
+        const latestSaved = loadPersistedRoomState(normalizedCode);
+        const seatedNow = latestSaved ? getSeatedPlayersCount(latestSaved.players) : 0;
+        if (latestSaved && latestSaved.roomMode === 'real' && seatedNow >= 2) {
+          broadcastAll(latestSaved);
+        } else {
+          sendJoinAndSyncRequest();
+          if (soloPublishTimer) clearTimeout(soloPublishTimer);
+          soloPublishTimer = setTimeout(() => {
+            const currentAfterWait = loadPersistedRoomState(normalizedCode);
+            if (
+              !hasReceivedPeerTableState &&
+              currentAfterWait &&
+              currentAfterWait.roomMode === 'real' &&
+              getSeatedPlayersCount(currentAfterWait.players) >= 1
+            ) {
+              broadcastAll(currentAfterWait);
+            }
+          }, 450);
+        }
+      },
     }
-  });
+  );
 
   function broadcastAll(state: PokerTableState): void {
     const profile = loadUserProfile();
@@ -103,9 +172,35 @@ export function connectToPokerRoom(
   function handleIncomingSyncRequest(): void {
     const current = loadPersistedRoomState(normalizedCode);
     if (!current || current.roomMode !== 'real') return;
-    if (getSeatedPlayersCount(current.players) >= 2) {
+    if (getSeatedPlayersCount(current.players) >= 1) {
       broadcastAll(current);
     }
+  }
+
+  function syncRoomMetadataFromState(state: PokerTableState): void {
+    if (state.roomMode !== 'real' || normalizedCode === 'BOTS') return;
+    const existing = loadOpenRooms().find((r) => r.code === normalizedCode);
+    const resolvedPacing = state.pacingMode ?? existing?.pacingMode ?? 'live';
+    const resolvedBuyIn = state.tableBuyIn ?? existing?.buyIn ?? 200;
+    const sb = Math.max(1, Math.round(resolvedBuyIn / 100));
+    const bb = Math.max(2, Math.round(resolvedBuyIn / 50));
+    const seated = Math.max(1, getSeatedPlayersCount(state.players));
+    const currentActor = state.players[state.currentTurnIndex];
+
+    upsertOpenRoom({
+      code: normalizedCode,
+      name: state.roomName ?? existing?.name ?? `Sala #${normalizedCode}`,
+      pacingMode: resolvedPacing,
+      roomMode: 'real',
+      buyIn: resolvedBuyIn,
+      playerCount: seated,
+      maxPlayers: 6,
+      blindsLabel: `${sb}/${bb}`,
+      turnTimerSeconds: resolvedPacing === 'live' ? 25 : null,
+      currentTurnPlayerName:
+        seated < 2 ? 'Esperando...' : currentActor?.name ?? existing?.currentTurnPlayerName ?? 'En juego',
+      updatedAt: Date.now(),
+    });
   }
 
   function handleIncomingTableState(incoming: PokerTableState): void {
@@ -121,10 +216,40 @@ export function connectToPokerRoom(
 
     if (incoming.roomMode === 'real') {
       const existingMe = incoming.players.find((p) => p.id === localProfile.playerId);
-      const effectiveStack =
-        existingMe && existingMe.stack > 0
-          ? existingMe.stack
-          : (incoming.tableBuyIn ?? 200);
+      const localMe = currentLocal?.players.find((p) => p.id === localProfile.playerId);
+      let effectiveStack = 0;
+
+      if (existingMe && existingMe.stack > 0 && existingMe.status !== 'out') {
+        effectiveStack = existingMe.stack;
+        // If user just paid a fresh buy-in locally on a room where they already held an active remote seat, refund duplicate deduction
+        if (
+          !hasReconciledRemoteSeat &&
+          committedStackForJoin > 0 &&
+          (!localMe || localMe.status === 'out' || getSeatedPlayersCount(currentLocal?.players ?? []) < 2)
+        ) {
+          // Only refund if currentLocal didn't already represent this same remote seat
+          const localSeatedCount = currentLocal ? getSeatedPlayersCount(currentLocal.players) : 0;
+          if (localSeatedCount <= 1 && currentLocal?.createdAt !== incoming.createdAt) {
+            returnTableStack(committedStackForJoin);
+            committedStackForJoin = 0;
+          }
+        }
+        hasReconciledRemoteSeat = true;
+      } else {
+        // Joining a remote room we weren't seated in yet: reconcile committedStackForJoin against room's real tableBuyIn
+        const targetBuyIn = incoming.tableBuyIn ?? 200;
+        if (!hasReconciledRemoteSeat && committedStackForJoin > 0) {
+          if (committedStackForJoin > targetBuyIn) {
+            returnTableStack(committedStackForJoin - targetBuyIn);
+            committedStackForJoin = targetBuyIn;
+          } else if (committedStackForJoin < targetBuyIn) {
+            const { paid } = deductTableBuyIn(targetBuyIn - committedStackForJoin);
+            committedStackForJoin += paid;
+          }
+          hasReconciledRemoteSeat = true;
+        }
+        effectiveStack = committedStackForJoin;
+      }
 
       const { state: withMe, changed } = seatPlayerInTable(incoming, {
         id: localProfile.playerId,
@@ -132,14 +257,24 @@ export function connectToPokerRoom(
         avatarId: localProfile.avatarId,
         stack: effectiveStack,
       });
-      savePersistedRoomState(normalizedCode, withMe);
-      onPresenceChange?.(Math.max(1, getSeatedPlayersCount(withMe.players)));
-      onStateReceived(withMe);
+
+      const mergedMetaState: PokerTableState = {
+        ...withMe,
+        pacingMode: incoming.pacingMode ?? withMe.pacingMode,
+        roomName: incoming.roomName ?? withMe.roomName,
+        tableBuyIn: incoming.tableBuyIn ?? withMe.tableBuyIn,
+      };
+
+      savePersistedRoomState(normalizedCode, mergedMetaState);
+      syncRoomMetadataFromState(mergedMetaState);
+      onPresenceChange?.(Math.max(1, getSeatedPlayersCount(mergedMetaState.players)));
+      onStateReceived(mergedMetaState);
       if (changed) {
-        broadcastAll(withMe);
+        broadcastAll(mergedMetaState);
       }
       return;
     }
+
     savePersistedRoomState(normalizedCode, incoming);
     onPresenceChange?.(Math.max(1, getSeatedPlayersCount(incoming.players)));
     onStateReceived(incoming);
@@ -156,18 +291,28 @@ export function connectToPokerRoom(
     const current = loadPersistedRoomState(normalizedCode);
     if (!current || current.roomMode !== 'real') return;
 
-    const { state: updated, changed } = seatPlayerInTable(current, joiningPlayer);
+    const maxRoomBuyIn = current.tableBuyIn ?? 500;
+    const normalizedJoinStack =
+      typeof joiningPlayer.stack === 'number'
+        ? Math.min(Math.max(0, Math.round(joiningPlayer.stack)), maxRoomBuyIn)
+        : maxRoomBuyIn;
+
+    const { state: updated, changed } = seatPlayerInTable(current, {
+      ...joiningPlayer,
+      stack: normalizedJoinStack,
+    });
     if (changed) {
       savePersistedRoomState(normalizedCode, updated);
+      syncRoomMetadataFromState(updated);
       onPresenceChange?.(Math.max(1, getSeatedPlayersCount(updated.players)));
       onStateReceived(updated);
       broadcastAll(updated);
     } else if (
       updated.players.some((p) => p.id === joiningPlayer.id) &&
-      getSeatedPlayersCount(updated.players) >= 2
+      getSeatedPlayersCount(updated.players) >= 1
     ) {
-      // Joining player is already seated (e.g. reconnecting or retrying join_request):
-      // Seat 0 (authoritative host/dealer) or any active peer re-broadcasts the authoritative table state!
+      // Joining player is already seated or we are the host holding authoritative state:
+      // re-broadcast authoritative table state immediately!
       broadcastAll(updated);
     }
   }
@@ -184,51 +329,19 @@ export function connectToPokerRoom(
     };
   }
 
-  // Announce our presence so any peer in the room seats us immediately
-  const profile = loadUserProfile();
-  const joinPayload = {
-    type: 'join_request',
-    player: {
-      id: profile.playerId || playerId,
-      name: profile.name || playerName || 'Jugador',
-      avatarId: profile.avatarId || 'hero',
-      xp: profile.xp,
-      stack: profile.bankroll,
-    },
-  };
-  bc?.postMessage(joinPayload);
-  mqtt.publish(eventsTopic, joinPayload, false);
+  // Announce our presence immediately via BroadcastChannel & MQTT
+  sendJoinAndSyncRequest();
 
-  // If a joining player doesn't receive `table_state` within 800ms of sending `join_request`,
-  // automatically retry `join_request` and `sync_request` so any peer in the room replies immediately!
+  // Retry join_request + sync_request after 800ms if no peer state or still waiting for a 2nd player
   retryTimer = setTimeout(() => {
     const latestSaved = loadPersistedRoomState(normalizedCode);
     const seatedNow = latestSaved ? getSeatedPlayersCount(latestSaved.players) : 1;
     if (!hasReceivedPeerTableState || seatedNow < 2) {
-      const freshProfile = loadUserProfile();
-      const retryJoinPayload = {
-        type: 'join_request',
-        player: {
-          id: freshProfile.playerId || playerId,
-          name: freshProfile.name || playerName || 'Jugador',
-          avatarId: freshProfile.avatarId || 'hero',
-          xp: freshProfile.xp,
-          stack: freshProfile.bankroll,
-        },
-      };
-      const syncReqPayload = {
-        type: 'sync_request',
-        playerId: freshProfile.playerId || playerId,
-      };
-      bc?.postMessage(retryJoinPayload);
-      bc?.postMessage(syncReqPayload);
-      mqtt.publish(eventsTopic, retryJoinPayload, false);
-      mqtt.publish(eventsTopic, syncReqPayload, false);
+      sendJoinAndSyncRequest();
     }
   }, 800);
 
-  // If we already have a local room state with players, update presence count;
-  // only publish retained state immediately if 2+ players are already seated so a solo joiner doesn't overwrite the host!
+  // Update local presence count; if 2+ players are already seated, publish immediately
   const initialSaved = loadPersistedRoomState(normalizedCode);
   if (initialSaved && initialSaved.roomMode === 'real') {
     const initialSeated = getSeatedPlayersCount(initialSaved.players);
@@ -240,6 +353,7 @@ export function connectToPokerRoom(
 
   const cleanupCommon = () => {
     if (retryTimer) clearTimeout(retryTimer);
+    if (soloPublishTimer) clearTimeout(soloPublishTimer);
     bc?.close();
     mqtt.close();
   };

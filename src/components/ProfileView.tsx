@@ -22,7 +22,12 @@ import {
   upsertKnownPlayer,
 } from '../lib/profile';
 import { isSupabaseConfigured } from '../lib/supabase';
-import { SUPPORTED_LANGUAGES, type SupportedLanguage, t } from '../lib/i18n';
+import {
+  getLocalizedCardBackName,
+  SUPPORTED_LANGUAGES,
+  type SupportedLanguage,
+  t,
+} from '../lib/i18n';
 import { Avatar3D } from './poker/Avatar3D';
 import { OffsuitCardBack } from './poker/PlayingCard';
 
@@ -56,6 +61,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onProfileChange,
   onOpenCreateOrInviteModal,
 }) => {
+  const currentLang: SupportedLanguage = profile.language ?? 'es';
   const [nameDraft, setNameDraft] = useState(profile.name);
   const [avatarDraft, setAvatarDraft] = useState(profile.avatarId);
   const [friendNameInput, setFriendNameInput] = useState('');
@@ -73,6 +79,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     [profile.playerId, profile.bankroll]
   );
   const totalBalance = profile.bankroll + activeTablesChips;
+
+  const currentRankTier = useMemo(
+    () =>
+      [...RANK_TIERS].reverse().find((r) => profile.level >= r.minLevel) ??
+      RANK_TIERS[0],
+    [profile.level]
+  );
 
   const metrics = computePlaystyleMetrics(profile.stats);
   const hasPlayedHands = metrics.archetype !== null;
@@ -149,7 +162,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const handleSaveProfileEdit = (e?: React.FormEvent) => {
     e?.preventDefault();
-    const trimmed = nameDraft.trim() || profile.name || 'Jugador';
+    const trimmed = nameDraft.trim() || profile.name || t(currentLang, 'playerFallback');
     const next = updateUserProfile((prev) => ({
       ...prev,
       name: trimmed,
@@ -206,11 +219,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const handleShareOrCopyRoomLink = async () => {
     const code = activeRoomCode || 'MESA1';
     const url = `${window.location.origin}/?room=${encodeURIComponent(code)}`;
-    const shareMessage = `🃏 ¡Únete a mi mesa de Poker (#${code}) en Juegos de Cartas!\n\n📱 Si tienes la app 'Cartas' en tu iPhone:\n1. Abre la app 'Cartas'\n2. Escribe el código #${code} en Inicio\n\n🌐 O entra desde tu navegador:\n${url}`;
+    const shareMessage =
+      currentLang === 'en'
+        ? `🃏 Join my poker table #${code} in Card Games!\n\n📱 If you have the app on your Home Screen: open it and enter code #${code}\n🌐 Or join directly:\n${url}`
+        : currentLang === 'it'
+        ? `🃏 Unisciti al mio tavolo di poker #${code} in Giochi di Carte!\n\n📱 Se hai l'app sulla Home: aprila e inserisci il codice #${code}\n🌐 Oppure entra dal browser:\n${url}`
+        : `🃏 ¡Únete a mi mesa de Poker (#${code}) en Juegos de Cartas!\n\n📱 Si tienes la app en tu iPhone:\n1. Abre la app\n2. Escribe el código #${code} en Inicio\n\n🌐 O entra desde tu navegador:\n${url}`;
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: `Mesa #${code} · Juegos de Cartas`,
+          title: `${t(currentLang, 'tableLabel')} #${code} · ${t(currentLang, 'appTitle')}`,
           text: shareMessage,
         });
         return;
@@ -250,18 +268,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       const restored = restoreAccountFromSyncToken(token);
       if (restored) {
         onProfileChange(restored);
-        setLinkStatusMsg('¡Cuenta vinculada con éxito!');
+        setLinkStatusMsg(t(currentLang, 'linkSuccessMsg'));
         setLinkInput('');
         setTimeout(() => setLinkStatusMsg(null), 3000);
         return;
       }
       const linked = linkAccountById(raw);
       onProfileChange(linked);
-      setLinkStatusMsg(`¡Perfil actualizado con ID: ${linked.playerId}!`);
+      setLinkStatusMsg(t(currentLang, 'linkIdSuccessMsg', { id: linked.playerId }));
       setLinkInput('');
       setTimeout(() => setLinkStatusMsg(null), 3000);
     } catch {
-      setLinkStatusMsg('No se pudo vincular la cuenta. Revisa el código.');
+      setLinkStatusMsg(t(currentLang, 'linkFailMsg'));
       setTimeout(() => setLinkStatusMsg(null), 3000);
     }
   };
@@ -281,8 +299,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     onProfileChange(next);
   };
 
-  const currentLang = profile.language ?? 'es';
-
   const rankProgressPct = Math.min(
     100,
     Math.max(profile.xp === 0 ? 4 : 12, Math.round(((profile.xp % 250) / 250) * 100))
@@ -297,26 +313,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveSheet('settings')}
-          aria-label="Configuración"
+          aria-label={t(currentLang, 'settingsTitle')}
           className="absolute right-0 top-0 w-9 h-9 rounded-full flex items-center justify-center text-[#8e9099] hover:text-white active:scale-95 transition-all cursor-pointer"
         >
           <Settings className="w-5 h-5 stroke-[1.8]" />
         </button>
 
-        {/* Centered 3D Avatar with small edit badge (✎) — full 72px circular avatar never cut off at top */}
+        {/* Centered 3D Avatar with small edit badge (✎) */}
         <div className="relative">
           <button
             type="button"
             onClick={handleOpenProfileEditor}
             className="w-[72px] h-[72px] rounded-full bg-[#16181d] border border-[#25272e] flex items-center justify-center overflow-hidden active:scale-95 transition-transform cursor-pointer"
-            title="Editar nombre y avatar"
+            title={t(currentLang, 'nameEditTitle')}
           >
             <Avatar3D avatarId={profile.avatarId} size={64} />
           </button>
           <button
             type="button"
             onClick={handleOpenProfileEditor}
-            aria-label="Editar perfil"
+            aria-label={t(currentLang, 'nameEditTitle')}
             className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-[#1e2028] border border-[#323540] text-white flex items-center justify-center shadow-md cursor-pointer"
           >
             <Pencil className="w-3 h-3" />
@@ -329,7 +345,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           onClick={handleOpenProfileEditor}
           className="mt-1.5 text-[19px] font-medium text-white tracking-tight hover:opacity-80 cursor-pointer leading-tight"
         >
-          {profile.name || 'Jugador'}
+          {profile.name || t(currentLang, 'playerFallback')}
         </button>
       </div>
 
@@ -344,30 +360,32 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <span className="text-[21px] leading-none">👫</span>
           <div className="flex flex-col">
             <span className="text-[14px] font-medium text-white leading-tight">
-              Amigos
+              {t(currentLang, 'friendsLabel')}
             </span>
             <span className="text-[11px] text-[#7c7d85]">
               {profile.friends.length}{' '}
-              {profile.friends.length === 1 ? 'agregado' : 'agregados'}
+              {profile.friends.length === 1
+                ? t(currentLang, 'addedSingular')
+                : t(currentLang, 'addedPlural')}
             </span>
           </div>
         </button>
 
-        {/* Top-right: High-contrast white-bordered pill button (CREAR SALA / INVITAR AMIGOS) */}
+        {/* Top-right: High-contrast white-bordered pill button */}
         <button
           type="button"
           onClick={onOpenCreateOrInviteModal}
           className="h-[54px] rounded-[18px] bg-[#141519] border-2 border-white px-3 flex flex-col items-center justify-center text-center active:scale-[0.99] transition-transform cursor-pointer"
         >
           <span className="text-[12px] font-bold tracking-wider text-white uppercase leading-tight">
-            CREAR SALA
+            {t(currentLang, 'createRoomShort')}
           </span>
           <span className="text-[9.5px] font-medium text-white/75 tracking-wide uppercase mt-0.5">
-            INVITAR AMIGOS
+            {t(currentLang, 'inviteFriendsShort')}
           </span>
         </button>
 
-        {/* Middle-left: 👋 6 (24) Emotes pill */}
+        {/* Middle-left: 👋 Emotes pill */}
         <button
           type="button"
           onClick={() => setActiveSheet('emotes')}
@@ -404,7 +422,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </span>
               <span className="text-[11.5px] text-[#7c7d85]">(20)</span>
             </div>
-            <span className="text-[11px] text-[#7c7d85] truncate">Card backs</span>
+            <span className="text-[11px] text-[#7c7d85] truncate">
+              {t(currentLang, 'cardBacksLabel')}
+            </span>
           </div>
         </button>
       </div>
@@ -412,9 +432,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       {/* Quick Card Back Color Swatches Row */}
       <div className="mt-2 flex items-center justify-between bg-[#111216] border border-[#1f2127] rounded-[14px] px-3 py-1.5">
         <span className="text-[11px] text-[#7c7d85]">
-          Dorso activo:{' '}
+          {t(currentLang, 'activeBackLabel')}{' '}
           <strong className="text-white font-medium">
-            {CARD_BACK_THEMES[profile.cardBackColor].name}
+            {getLocalizedCardBackName(profile.cardBackColor, currentLang)}
           </strong>
         </span>
         <div className="flex items-center gap-2">
@@ -426,7 +446,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 key={cid}
                 type="button"
                 onClick={() => handleSelectCardBack(cid)}
-                aria-label={`Color de dorso ${theme.name}`}
+                aria-label={getLocalizedCardBackName(cid, currentLang)}
                 className={`w-4 h-4 rounded-full transition-transform cursor-pointer ${
                   isSelected ? 'ring-2 ring-white scale-110' : 'opacity-65 hover:opacity-100'
                 }`}
@@ -437,21 +457,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       </div>
 
-
-      {/* Full-width bottom pill: 🦐 Shrimp · Rank progress (Interactive Button) */}
+      {/* Full-width bottom pill: Dynamic Rank Tier · Rank progress (Interactive Button) */}
       <button
         type="button"
         onClick={() => setActiveSheet('rank')}
         className="mt-2 w-full rounded-[18px] bg-[#141519] border border-[#22242a] px-3.5 py-2.5 flex items-center gap-3 text-left active:scale-[0.99] transition-transform cursor-pointer"
       >
-        <span className="text-[22px] leading-none">🦐</span>
+        <span className="text-[22px] leading-none">{currentRankTier.emoji}</span>
         <div className="flex-1 flex flex-col gap-1">
           <div className="flex items-center justify-between">
             <span className="text-[14px] font-medium text-white leading-none">
-              Shrimp
+              {currentRankTier.name}
             </span>
             <span className="text-[11px] text-[#7c7d85]">
-              Nivel {profile.level} · {profile.xp} XP · {totalBalance} fichas
+              {t(currentLang, 'level')} {profile.level} · {profile.xp} XP · {totalBalance}{' '}
+              {t(currentLang, 'chipsUnit')}
             </span>
           </div>
           <div className="w-full h-[4.5px] rounded-full bg-[#25272f] overflow-hidden">
@@ -461,7 +481,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             />
           </div>
           <span className="text-[10.5px] text-[#7c7d85] leading-none">
-            Rank progress
+            {t(currentLang, 'rankProgressLabel')}
           </span>
         </div>
       </button>
@@ -471,10 +491,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <div className="mt-2.5 p-3 rounded-[18px] bg-red-950/40 border border-red-500/30 flex items-center justify-between gap-3">
           <div className="flex flex-col text-left">
             <span className="text-[12.5px] font-semibold text-red-200">
-              Bancarrota (0 fichas)
+              {t(currentLang, 'bankruptTitle')}
             </span>
             <span className="text-[11px] text-red-300/80">
-              Reclama 200 fichas de auxilio
+              {t(currentLang, 'bankruptDesc')}
             </span>
           </div>
           <button
@@ -483,19 +503,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               const next = claimBankruptcyBonus();
               onProfileChange(next);
             }}
-            className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-bold active:scale-95 transition-transform cursor-pointer"
+            className="h-7 px-3 rounded-full bg-white text-black text-[11.5px] font-bold active:scale-95 transition-transform cursor-pointer shrink-0"
           >
-            +200 fichas
+            +200 {t(currentLang, 'chipsUnit')}
           </button>
         </div>
       )}
 
-      {/* Sincronización de Cuenta (Safari vs PWA) */}
+      {/* Account Identity & Safari Sync */}
       <div className="mt-2.5 rounded-[18px] bg-[#141519] border border-[#22242a] p-3 flex flex-col gap-2.5 text-left">
         <div className="flex items-center justify-between">
           <div className="flex flex-col">
             <span className="text-[12px] font-semibold text-white">
-              Identidad de Cuenta
+              {t(currentLang, 'accountIdentityTitle')}
             </span>
             <span className="text-[11px] text-[#7c7d85] font-mono mt-0.5">
               ID: {profile.playerId}
@@ -509,12 +529,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             {copiedPlayerId ? (
               <>
                 <Check className="w-3 h-3 text-emerald-400" />
-                <span className="text-emerald-400">¡Copiado!</span>
+                <span className="text-emerald-400">{t(currentLang, 'copied')}</span>
               </>
             ) : (
               <>
                 <Copy className="w-3 h-3" />
-                <span>Copiar ID</span>
+                <span>{t(currentLang, 'copyIdBtn')}</span>
               </>
             )}
           </button>
@@ -528,12 +548,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           {copiedSyncLink ? (
             <>
               <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-emerald-400 font-semibold">¡Enlace copiado! Ábrelo en Safari o PWA</span>
+              <span className="text-emerald-400 font-semibold">
+                {t(currentLang, 'syncLinkCopied')}
+              </span>
             </>
           ) : (
             <>
               <Share2 className="w-3.5 h-3.5 text-[#fb923c]" />
-              <span>Copiar enlace para sincronizar con Safari / PWA</span>
+              <span>{t(currentLang, 'copySyncLinkBtn')}</span>
             </>
           )}
         </button>
@@ -543,14 +565,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             type="text"
             value={linkInput}
             onChange={(e) => setLinkInput(e.target.value)}
-            placeholder="Vincular con ID o enlace ?sync=..."
+            placeholder={t(currentLang, 'linkInputPlaceholder')}
             className="flex-1 h-8 rounded-full bg-black border border-[#25272e] px-3 text-[11px] text-white placeholder:text-[#6b6d76] focus:outline-none focus:border-white"
           />
           <button
             type="submit"
             className="h-8 px-3 rounded-full bg-white text-black text-[11px] font-semibold active:scale-95 transition-transform cursor-pointer shrink-0"
           >
-            Vincular
+            {t(currentLang, 'linkBtn')}
           </button>
         </form>
 
@@ -565,16 +587,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       <div className="mt-3">
         <div className="flex items-center justify-between mb-0.5">
           <h2 className="text-[17px] font-semibold text-white tracking-tight">
-            Statistics
+            {t(currentLang, 'statisticsHeading')}
           </h2>
           <span className="text-[11px] text-[#7c7d85]">
-            {profile.stats.handsPlayed} manos jugadas
+            {t(currentLang, 'handsPlayedLabel', { count: profile.stats.handsPlayed })}
           </span>
         </div>
 
         {!hasPlayedHands && (
           <p className="text-[11px] text-[#8e9099] mb-1">
-            Sin partidas aún · Juega manos para ver tu estilo
+            {t(currentLang, 'noHandsYetSub')}
           </p>
         )}
 
@@ -683,7 +705,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               fontSize="13"
               fontWeight="600"
             >
-              Aggressive
+              {t(currentLang, 'radarAggressive')}
             </text>
             <text
               x={cx}
@@ -692,7 +714,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               fill="#7c7d85"
               fontSize="10.5"
             >
-              More bets &amp; raises
+              {t(currentLang, 'radarAggressiveSub')}
             </text>
 
             <text
@@ -703,7 +725,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               fontSize="13"
               fontWeight="600"
             >
-              Passive
+              {t(currentLang, 'radarPassive')}
             </text>
             <text
               x={cx}
@@ -712,7 +734,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               fill="#7c7d85"
               fontSize="10.5"
             >
-              More calls
+              {t(currentLang, 'radarPassiveSub')}
             </text>
 
             <text
@@ -723,7 +745,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               fontSize="13"
               fontWeight="600"
             >
-              Tight
+              {t(currentLang, 'radarTight')}
             </text>
             <text
               x={44}
@@ -732,7 +754,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               fill="#7c7d85"
               fontSize="10.5"
             >
-              Less hands
+              {t(currentLang, 'radarTightSub')}
             </text>
 
             <text
@@ -743,7 +765,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               fontSize="13"
               fontWeight="600"
             >
-              Loose
+              {t(currentLang, 'radarLoose')}
             </text>
             <text
               x={316}
@@ -752,7 +774,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               fill="#7c7d85"
               fontSize="10.5"
             >
-              More hands
+              {t(currentLang, 'radarLooseSub')}
             </text>
 
             {/* 4 Corner Archetype Pill Badges: TAG, LAG, ROCK, FISH */}
@@ -799,11 +821,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           >
             <div className="flex items-center justify-between">
               <span className="text-[16px] font-semibold text-white">
-                Editar Perfil y Avatar
+                {t(currentLang, 'editProfileTitle')}
               </span>
               <button
                 type="button"
                 onClick={() => setActiveSheet(null)}
+                aria-label={t(currentLang, 'close')}
                 className="w-8 h-8 rounded-full bg-[#23252a] flex items-center justify-center text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -812,7 +835,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
             <div className="flex flex-col gap-1.5">
               <label className="text-[12px] text-[#9ca3af] font-medium">
-                Tu nombre de jugador
+                {t(currentLang, 'yourPlayerNameLabel')}
               </label>
               <input
                 type="text"
@@ -820,18 +843,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 onChange={(e) => setNameDraft(e.target.value)}
                 maxLength={18}
                 autoFocus
-                placeholder="Tu nombre"
+                placeholder={t(currentLang, 'welcomeInputPlaceholder')}
                 className="h-11 px-4 rounded-[16px] bg-black border border-[#2e313b] text-white text-[15px] focus:outline-none focus:border-white"
               />
             </div>
 
             <div className="flex flex-col gap-2">
               <span className="text-[12px] text-[#9ca3af] font-medium">
-                Elige tu Avatar 3D
+                {t(currentLang, 'chooseAvatar')}
               </span>
               <div className="grid grid-cols-3 gap-2.5">
                 {AVATAR_OPTIONS.map((av) => {
                   const isSelected = avatarDraft === av.id;
+                  const avatarLabel =
+                    av.id === 'hero'
+                      ? currentLang === 'en'
+                        ? 'Green Glasses'
+                        : currentLang === 'it'
+                        ? 'Occhiali Verdi'
+                        : 'Gafas Verdes'
+                      : av.label;
                   return (
                     <button
                       key={av.id}
@@ -845,7 +876,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     >
                       <Avatar3D avatarId={av.id} size={46} />
                       <span className="text-[11px] font-medium text-white">
-                        {av.label}
+                        {avatarLabel}
                       </span>
                     </button>
                   );
@@ -857,7 +888,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               type="submit"
               className="w-full h-11 rounded-full bg-white text-black text-[14px] font-semibold cursor-pointer active:scale-95 transition-transform"
             >
-              Guardar cambios
+              {t(currentLang, 'saveProfile')}
             </button>
           </form>
         </div>
@@ -869,11 +900,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <div className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <span className="text-[16px] font-semibold text-white">
-                Dorsos de Cartas (Card Backs)
+                {t(currentLang, 'cardBacksSheetTitle')}
               </span>
               <button
                 type="button"
                 onClick={() => setActiveSheet(null)}
+                aria-label={t(currentLang, 'close')}
                 className="w-8 h-8 rounded-full bg-[#23252a] flex items-center justify-center text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -882,7 +914,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
             <div className="grid grid-cols-2 gap-3">
               {CARD_BACK_ORDER.map((cid) => {
-                const theme = CARD_BACK_THEMES[cid];
                 const isSelected = profile.cardBackColor === cid;
                 return (
                   <button
@@ -902,7 +933,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       <OffsuitCardBack colorId={cid} className="w-full h-full" />
                     </div>
                     <span className="text-[12px] font-medium text-white">
-                      {theme.name}
+                      {getLocalizedCardBackName(cid, currentLang)}
                     </span>
                   </button>
                 );
@@ -920,12 +951,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <div className="flex items-center gap-2">
                 <Trophy className="w-4 h-4 text-[#fb923c]" />
                 <span className="text-[16px] font-semibold text-white">
-                  Progreso de Rango · Nivel {profile.level}
+                  {t(currentLang, 'rankSheetTitle', { level: profile.level })}
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => setActiveSheet(null)}
+                aria-label={t(currentLang, 'close')}
                 className="w-8 h-8 rounded-full bg-[#23252a] flex items-center justify-center text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -935,10 +967,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="bg-black/50 border border-[#23252a] rounded-[18px] p-3.5 flex flex-col gap-2">
               <div className="flex items-center justify-between text-[13px]">
                 <span className="text-white font-medium">
-                  XP Actual: {profile.xp} XP
+                  {t(currentLang, 'currentXpLabel', { xp: profile.xp })}
                 </span>
                 <span className="text-[#fb923c]">
-                  Faltan {xpToNextLevel} XP para Nivel {profile.level + 1}
+                  {t(currentLang, 'xpToNextLevelLabel', {
+                    xp: xpToNextLevel,
+                    level: profile.level + 1,
+                  })}
                 </span>
               </div>
               <div className="w-full h-2 rounded-full bg-[#25272f] overflow-hidden">
@@ -948,13 +983,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 />
               </div>
               <span className="text-[11px] text-[#7c7d85]">
-                Ganas +4 XP por cada decisión y +25 XP al ganar una mano.
+                {t(currentLang, 'xpEarnInfo')}
               </span>
             </div>
 
             <div className="flex flex-col gap-1.5">
               {RANK_TIERS.map((tier) => {
-                const isCurrent = tier.name === 'Shrimp';
+                const isCurrent = tier.name === currentRankTier.name;
                 return (
                   <div
                     key={tier.name}
@@ -987,11 +1022,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <div className="w-full max-w-[400px] bg-[#16171b] border border-[#262830] rounded-[28px] p-5 flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <span className="text-[16px] font-semibold text-white">
-                Seleccionar Emote de Mesa
+                {t(currentLang, 'selectEmoteTitle')}
               </span>
               <button
                 type="button"
                 onClick={() => setActiveSheet(null)}
+                aria-label={t(currentLang, 'close')}
                 className="w-8 h-8 rounded-full bg-[#23252a] flex items-center justify-center text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -1028,12 +1064,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <div className="flex items-center gap-2">
                 <Users className="w-4 h-4 text-emerald-400" />
                 <span className="text-[16px] font-semibold text-white">
-                  Amigos ({profile.friends.length})
+                  {t(currentLang, 'friendsLabel')} ({profile.friends.length})
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => setActiveSheet(null)}
+                aria-label={t(currentLang, 'close')}
                 className="w-8 h-8 rounded-full bg-[#23252a] flex items-center justify-center text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -1045,7 +1082,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 type="text"
                 value={friendNameInput}
                 onChange={(e) => setFriendNameInput(e.target.value)}
-                placeholder="Nombre de tu amigo (ej. Leo)"
+                placeholder={t(currentLang, 'friendPlaceholder')}
                 maxLength={18}
                 className="flex-1 h-10 rounded-full bg-black border border-[#25272e] px-4 text-[13px] text-white placeholder:text-[#7c7d85] focus:outline-none focus:border-white"
               />
@@ -1054,13 +1091,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 className="h-10 px-4 rounded-full bg-white text-black text-[12px] font-semibold flex items-center gap-1 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Agregar</span>
+                <span>{t(currentLang, 'addBtn')}</span>
               </button>
             </form>
 
             {profile.friends.length === 0 ? (
               <div className="bg-black/40 border border-[#23252a] rounded-[18px] p-4 text-center text-[12px] text-[#8e9099]">
-                Aún no tienes amigos agregados · Comparte el enlace de tu sala por WhatsApp o agrega a tus amigos arriba.
+                {t(currentLang, 'noAddedFriends')}
               </div>
             ) : (
               <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto">
@@ -1075,7 +1112,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         <div className="text-[14px] font-medium text-white">
                           {fr.name}
                         </div>
-                        <div className="text-[11px] text-[#7c7d85]">Amigo</div>
+                        <div className="text-[11px] text-[#7c7d85]">
+                          {t(currentLang, 'friendBadge')}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -1087,12 +1126,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         }}
                         className="h-7 px-3 rounded-full bg-white text-black text-[11px] font-semibold cursor-pointer"
                       >
-                        Crear Sala
+                        {t(currentLang, 'createTableBtn')}
                       </button>
                       <button
                         type="button"
                         onClick={() => handleRemoveFriend(fr.id)}
-                        aria-label={`Eliminar ${fr.name}`}
+                        aria-label={`${t(currentLang, 'close')} ${fr.name}`}
                         className="w-7 h-7 rounded-full bg-[#23252a] text-[#8e9099] hover:text-white flex items-center justify-center cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1111,7 +1150,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {copiedFriendLink ? (
                 <>
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>¡Enlace de invitación copiado!</span>
+                  <span>{t(currentLang, 'inviteLinkCopied')}</span>
                 </>
               ) : (
                 <>
@@ -1121,7 +1160,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     <Copy className="w-4 h-4" />
                   )}
                   <span>
-                    Compartir enlace de invitación
+                    {t(currentLang, 'shareInviteLinkBtn')}
                     {activeRoomCode ? ` (#${activeRoomCode})` : ''}
                   </span>
                 </>
@@ -1142,6 +1181,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveSheet(null)}
+                aria-label={t(currentLang, 'close')}
                 className="w-8 h-8 rounded-full bg-[#23252a] flex items-center justify-center text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -1216,7 +1256,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               className="w-full h-10 rounded-full bg-[#23252a] text-white/80 text-[12px] font-medium flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 rotate-45" />
-              <span>Reiniciar estadísticas a cero</span>
+              <span>{t(currentLang, 'resetStatsBtn')}</span>
             </button>
           </div>
         </div>

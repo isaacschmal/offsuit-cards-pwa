@@ -2,7 +2,7 @@ import React from 'react';
 import { formatRank, getSuitSymbol, isRedSuit } from '../../engine/deck';
 import type { ShowdownContenderResult } from '../../engine/poker/gameState';
 import type { Player } from '../../engine/types';
-import { formatHandName, type SupportedLanguage } from '../../lib/i18n';
+import { formatHandName, type SupportedLanguage, t } from '../../lib/i18n';
 import { AnimatedNumber } from './AnimatedNumber';
 import { Avatar3D } from './Avatar3D';
 
@@ -38,26 +38,29 @@ export const TopOpponentsRow: React.FC<TopOpponentsRowProps> = ({
                 +
               </div>
               <span className="mt-1 text-[10px] font-normal leading-tight text-[#6b6d76] truncate max-w-[62px]">
-                Esperando...
+                {t(language, 'waitingSeatName')}
               </span>
               <span className="mt-0.5 text-[10.5px] font-normal leading-tight text-[#4b4d55]">
-                Libre
+                {t(language, 'openSeatLabel')}
               </span>
               <div className="h-[22px] mt-1" />
             </div>
           );
         }
 
-        const isEliminated = opp.status === 'out' || opp.stack <= 0;
+        const isEliminated = opp.status === 'out' || (opp.stack <= 0 && opp.status !== 'all-in');
         const isDealer = !isEliminated && opp.seatIndex === dealerIndex;
         const isTurn = !isShowdown && !isEliminated && opp.seatIndex === currentTurnIndex;
         const isFolded = opp.status === 'folded';
+        const isAllIn = opp.status === 'all-in';
         const contender = isShowdown ? showdownContenders.find((c) => c.playerId === opp.id) : null;
         const isShowdownContender = Boolean(
           isShowdown && !isFolded && !isEliminated && opp.holeCards && opp.holeCards.length === 2
         );
         const showOverlayText = isEliminated
           ? 'OUT'
+          : isAllIn
+          ? 'All-in'
           : opp.lastAction === 'Fold' || opp.lastAction === 'Raise'
           ? opp.lastAction
           : null;

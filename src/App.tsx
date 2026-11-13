@@ -6,6 +6,7 @@ import {
   getSeatedPlayersCount,
   type PokerTableState,
   type RoomPlayersMode,
+  vacatePlayerSeat,
 } from './engine/poker/gameState';
 import {
   deletePersistedRoomState,
@@ -14,6 +15,7 @@ import {
   loadPersistedRoomState,
   type RoomPacingMode,
   savePersistedRoomState,
+  subscribeToSeatedRooms,
   upsertOpenRoom,
 } from './lib/multiplayer';
 import {
@@ -48,6 +50,7 @@ export function App() {
   const [externalState, setExternalState] = useState<PokerTableState | null>(null);
   const syncRef = useRef<RoomSyncHandle | null>(null);
   const pendingUrlRoomRef = useRef<string | null>(getInitialUrlRoomCode());
+  const paidEntryStackRef = useRef<number>(0);
 
   const handleJoinOrCreateRoom = useCallback(
     (
@@ -59,39 +62,65 @@ export function App() {
     ) => {
       const normalized = newCode.trim().toUpperCase();
       const existingRoom = loadOpenRooms().find((r) => r.code === normalized);
-      const resolvedMode: RoomPacingMode = mode ?? existingRoom?.pacingMode ?? 'live';
+      const existingSaved = loadPersistedRoomState(normalized);
+      const resolvedMode: RoomPacingMode =
+        mode ?? existingRoom?.pacingMode ?? existingSaved?.pacingMode ?? 'live';
       const resolvedPlayersMode: RoomPlayersMode =
         playersMode ??
         existingRoom?.roomMode ??
+        existingSaved?.roomMode ??
         (normalized === 'BOTS' ? 'bots' : 'real');
-      const resolvedName = customName ?? existingRoom?.name ?? `Sala #${normalized}`;
+      const resolvedName =
+        customName ?? existingRoom?.name ?? existingSaved?.roomName ?? `Sala #${normalized}`;
 
       const targetBuyIn =
         resolvedPlayersMode === 'bots'
           ? Math.min(100, buyIn ?? existingRoom?.buyIn ?? 100)
-          : (buyIn ?? existingRoom?.buyIn ?? 200);
+          : (buyIn ?? existingRoom?.buyIn ?? existingSaved?.tableBuyIn ?? 200);
 
       // Check if player is ALREADY seated in this room with an active table stack > 0
       const currentProfile = loadUserProfile();
-      const existingSaved = loadPersistedRoomState(normalized);
       const existingSeat = existingSaved?.players
         ? existingSaved.players.find((p) => p.id === currentProfile.playerId)
         : null;
-      const alreadyHasStack = Boolean(existingSeat && existingSeat.stack > 0 && existingSeat.status !== 'out');
+      const alreadyHasStack = Boolean(
+        resolvedPlayersMode !== 'bots' &&
+          normalized !== 'BOTS' &&
+          existingSeat &&
+          existingSeat.stack > 0 &&
+          existingSeat.status !== 'out'
+      );
+
+      if (!alreadyHasStack && currentProfile.bankroll <= 0) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cartas-insufficient-chips'));
+        }
+        return;
+      }
 
       let effectiveStack = targetBuyIn;
       if (!alreadyHasStack) {
         // Deduct buy-in only when entering a fresh table / new game
         const { paid } = deductTableBuyIn(targetBuyIn);
+        if (paid <= 0) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('cartas-insufficient-chips'));
+          }
+          return;
+        }
         effectiveStack = paid;
+        paidEntryStackRef.current = paid;
       } else if (existingSeat) {
         effectiveStack = existingSeat.stack;
+        paidEntryStackRef.current = existingSeat.stack;
       }
 
       const roomState = getOrInitRoomState(
         normalized,
         resolvedPlayersMode,
-        effectiveStack
+        effectiveStack,
+        resolvedMode,
+        resolvedName
       );
       const realSeatedCount =
         resolvedPlayersMode === 'bots'
@@ -107,13 +136,13 @@ export function App() {
         upsertOpenRoom({
           code: normalized,
           name: resolvedName,
-          pacingMode: resolvedMode,
+          pacingMode: roomState.pacingMode ?? resolvedMode,
           roomMode: resolvedPlayersMode,
           buyIn: actualBuyIn,
           playerCount: realSeatedCount,
           maxPlayers: 6,
           blindsLabel: `${sb}/${bb}`,
-          turnTimerSeconds: resolvedMode === 'live' ? 20 : null,
+          turnTimerSeconds: (roomState.pacingMode ?? resolvedMode) === 'live' ? 25 : null,
           currentTurnPlayerName:
             existingRoom?.currentTurnPlayerName ?? (profile.name || 'Jugador'),
           updatedAt: Date.now(),
@@ -121,8 +150,8 @@ export function App() {
       }
 
       setRoomCode(normalized);
-      setRoomName(resolvedName);
-      setPacingMode(resolvedMode);
+      setRoomName(roomState.roomName ?? resolvedName);
+      setPacingMode(roomState.pacingMode ?? resolvedMode);
       setTableState(roomState);
       setExternalState(roomState);
       setView('table');
@@ -140,8 +169,8 @@ export function App() {
         pendingUrlRoomRef.current = null;
         handleJoinOrCreateRoom(
           targetRoom,
-          'live',
-          `Sala #${targetRoom}`,
+          undefined,
+          undefined,
           targetRoom === 'BOTS' ? 'bots' : 'real'
         );
       }
@@ -153,8 +182,49 @@ export function App() {
       window.removeEventListener('cartas-profile-updated', checkPendingRoomJoin);
   }, [handleJoinOrCreateRoom]);
 
+  // Recover orphaned BOTS sessions & listen to all seated tables while in the Lobby
+  useEffect(() => {
+    if (view !== 'lobby') return;
+
+    const profile = loadUserProfile();
+    const orphanedBotState = loadPersistedRoomState('BOTS');
+    if (orphanedBotState && Array.isArray(orphanedBotState.players)) {
+      const heroBotSeat = orphanedBotState.players.find(
+        (p) => (p.id === profile.playerId || p.id === 'hero') && p.status !== 'out'
+      );
+      if (heroBotSeat && heroBotSeat.stack > 0) {
+        returnTableStack(heroBotSeat.stack);
+      }
+      deletePersistedRoomState('BOTS');
+    }
+
+    const openRooms = loadOpenRooms();
+    const seatedRoomCodes = openRooms
+      .filter((r) => {
+        const saved = loadPersistedRoomState(r.code);
+        return Boolean(
+          saved?.players?.some(
+            (p) => (p.id === profile.playerId || p.id === 'hero') && p.stack > 0 && p.status !== 'out'
+          )
+        );
+      })
+      .map((r) => r.code);
+
+    if (seatedRoomCodes.length === 0) return;
+
+    return subscribeToSeatedRooms(seatedRoomCodes, profile.playerId, () => {
+      window.dispatchEvent(new CustomEvent('cartas-rooms-updated'));
+    });
+  }, [view]);
+
+  // Connect to active poker room ONLY when actually inside the table view
   useEffect(() => {
     syncRef.current?.disconnect();
+    if (view !== 'table') {
+      syncRef.current = null;
+      return;
+    }
+
     // Bot rooms are 100% offline local single-player; never connect to remote network MQTT
     if (roomCode === 'BOTS' || tableState.roomMode === 'bots') {
       syncRef.current = null;
@@ -170,16 +240,23 @@ export function App() {
       (incomingState) => {
         setExternalState(incomingState);
         setTableState(incomingState);
+        if (incomingState.pacingMode) {
+          setPacingMode(incomingState.pacingMode);
+        }
+        if (incomingState.roomName) {
+          setRoomName(incomingState.roomName);
+        }
         savePersistedRoomState(roomCode, incomingState);
       },
-      (count) => setOnlineCount(count)
+      (count) => setOnlineCount(count),
+      paidEntryStackRef.current
     );
     syncRef.current = handle;
 
     return () => {
       handle.disconnect();
     };
-  }, [roomCode, tableState.roomMode]);
+  }, [view, roomCode, tableState.roomMode]);
 
   const handleBroadcastState = useCallback(
     (nextState: PokerTableState) => {
@@ -207,7 +284,7 @@ export function App() {
       const actualCashOut = shouldCashOut || isBotGame;
 
       if (actualCashOut) {
-        // Explicit cash out: return table stack to player's wallet
+        // Explicit cash out: return table stack to player's wallet and vacate seat
         if (typeof finalStack === 'number' && finalStack > 0) {
           returnTableStack(finalStack);
         }
@@ -215,16 +292,8 @@ export function App() {
           deletePersistedRoomState(roomCode);
         } else {
           const profile = loadUserProfile();
-          const updatedPlayers = tableState.players.map((p) =>
-            p.id === profile.playerId || p.id === 'hero'
-              ? { ...p, stack: 0, status: 'out' as const }
-              : p
-          );
-          const nextState: PokerTableState = {
-            ...tableState,
-            players: updatedPlayers,
-            stateVersion: (tableState.stateVersion ?? 1) + 1,
-          };
+          const latestSaved = loadPersistedRoomState(roomCode) ?? tableState;
+          const nextState = vacatePlayerSeat(latestSaved, profile.playerId);
           savePersistedRoomState(roomCode, nextState);
           syncRef.current?.broadcastState(nextState);
         }
